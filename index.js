@@ -367,6 +367,7 @@ let rules = {
   "Sorceress's Garden": false,
   Spells: false,
   "Show Skill Tasks": false,
+  "Show All Skill Tasks": false,
   "Show Quest Tasks": false,
   "Show Diary Tasks": false,
   "Show Best in Slot Tasks": false,
@@ -516,6 +517,8 @@ let ruleNames = {
     "Spells count as a way to process runes via Magic, and therefore can count as chunk tasks",
   "Show Skill Tasks":
     "Show Skill Tasks (e.g. Get 43 Crafting to cut a diamond)",
+  "Show All Skill Tasks":
+    "Show every currently valid skill task instead of only the highest-level task per skill.",
   "Show Quest Tasks": "Show Quest Tasks",
   "Show Diary Tasks": "Show Area Tasks achievements",
   "Show Best in Slot Tasks":
@@ -810,6 +813,7 @@ let rulePresets = {
     "Primary Spawn": true,
     "Secondary Bird Nests": true,
     "Progressive Skill Caps": true,
+    "Show All Skill Tasks": true,
   },
   "Extreme Chunker": {
     Skillcape: true,
@@ -1016,7 +1020,7 @@ let rulePresetFlavor = {
 
 let ruleStructure = {
   "Visible Tasks": {
-    "Show Skill Tasks": true,
+    "Show Skill Tasks": ["Show All Skill Tasks"],
     Achievement: true,
     "Show Quest Tasks": ["Show Quest Tasks Complete"],
     "Show Best in Slot Tasks": [
@@ -1835,6 +1839,7 @@ let questProgress = {};
 let diaryProgress = {};
 let skillQuestXp = {};
 let tempChallengeArrSaved = {};
+let allSkillTaskArrSaved = {};
 let assignedXpRewards = {};
 let introRollSelected = false;
 let introFancySelected = false;
@@ -4849,7 +4854,7 @@ let handleMouseUp = function (e) {
             .show();
         setRecentRoll(chunkId);
         chunkJustRolled = true;
-        completeChallenges();
+        completeChallenges(false);
         setCurrentChallenges(
           ["No tasks currently backlogged."],
           ["No tasks currently completed."],
@@ -6817,6 +6822,7 @@ let workerOnMessage = function (e) {
         baseChunkData,
         highestCurrent,
         tempChallengeArrSaved,
+        allSkillTaskArr: allSkillTaskArrSaved,
         questPointTotal,
         highestOverall,
         dropRatesGlobal,
@@ -6835,6 +6841,7 @@ let workerOnMessage = function (e) {
         globalEveryDropAltMap,
         altAmmoGlobal,
       } = e.data);
+      allSkillTaskArrSaved = allSkillTaskArrSaved || {};
       Object.keys(savedChunks)
         .filter((area) => {
           return savedChunks[area] === true;
@@ -10843,9 +10850,59 @@ let calcCurrentChallenges2 = function (tempChallengeArr) {
   listOfTasksPlugin = setupCurrentChallenges(tempChallengeArr);
 };
 
+let getSkillChallengeClass = function (skill, challenge) {
+  return (
+    skill +
+    "-" +
+    challenge
+      .replaceAll(" ", "_")
+      .replace(/[!"#$%&'()*+,.\/:;<=>?@\[\\\]\^\`{|}~]/g, "")
+      .toLowerCase() +
+    "-challenge"
+  );
+};
+
+let getSkillTaskSortLevel = function (skill, challenge) {
+  if (!challenge) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  let skillTask = challenge;
+  let boost = 0;
+  if (skillTask.match(/\{[0-9]+\}/g)) {
+    boost = parseInt(skillTask.match(/\{[0-9]+\}/g)[0].match(/\d+/)[0]);
+    skillTask = skillTask.replaceAll(/\{[0-9]+\}/g, "");
+  }
+  if (
+    boost === 0 &&
+    globalValidsBoosts.hasOwnProperty(skill) &&
+    globalValidsBoosts[skill].hasOwnProperty(skillTask)
+  ) {
+    boost = globalValidsBoosts[skill][skillTask];
+  }
+  if (
+    chunkInfo["challenges"].hasOwnProperty(skill) &&
+    chunkInfo["challenges"][skill].hasOwnProperty(skillTask)
+  ) {
+    return Math.max(
+      chunkInfo["challenges"][skill][skillTask]["Level"] - boost,
+      1,
+    );
+  }
+  return Number.MAX_SAFE_INTEGER;
+};
+
+let sortSkillTasksByLevel = function (skill, tasks) {
+  return [...tasks].sort((a, b) => {
+    let levelDiff =
+      getSkillTaskSortLevel(skill, a) - getSkillTaskSortLevel(skill, b);
+    return levelDiff !== 0 ? levelDiff : a.localeCompare(b);
+  });
+};
+
 // Sets up data for displaying
 let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
   let listOfTasks = [];
+  let renderedSkillTasks = {};
   activeTasks = {};
   !rules["Show Skill Tasks"] &&
     challengeArr.forEach((line) => {
@@ -10864,70 +10921,79 @@ let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
         `<div class="marker marker-skill noscroll" onclick="expandActive('skill')"><i class="expand-button fa-solid ${activeSubTabs["skill"] ? "fa-caret-down" : "fa-caret-right"} noscroll"></i><span class="noscroll">Skill Tasks</span></div>`,
       );
     rules["Show Skill Tasks"] &&
-      Object.keys(tempChallengeArr)
+      Object.keys(
+        rules["Show All Skill Tasks"] && allSkillTaskArrSaved
+          ? { ...tempChallengeArr, ...allSkillTaskArrSaved }
+          : tempChallengeArr,
+      )
         .sort()
         .forEach((skill) => {
-          let skillTask = tempChallengeArr[skill];
-          let boost = 0;
-          if (
-            !!tempChallengeArr[skill] &&
-            tempChallengeArr[skill].match(/\{[0-9]+\}/g)
-          ) {
-            skillTask = tempChallengeArr[skill].replaceAll(/\{[0-9]+\}/g, "");
-            boost = tempChallengeArr[skill]
-              .match(/\{[0-9]+\}/g)[0]
-              .match(/\d+/)[0];
-          }
-          if (boost === 0) {
-            boost =
-              globalValidsBoosts.hasOwnProperty(skill) &&
-              globalValidsBoosts[skill].hasOwnProperty(skillTask)
-                ? globalValidsBoosts[skill][skillTask]
-                : 0;
-          }
-          let hasAlts =
-            Object.keys(globalValids[skill]).filter(
-              (chal) =>
-                globalValids[skill][chal] -
-                  (globalValidsBoosts.hasOwnProperty(skill) &&
-                  globalValidsBoosts[skill].hasOwnProperty(chal)
-                    ? globalValidsBoosts[skill][chal]
-                    : 0) ===
-                  globalValids[skill][skillTask] -
+          let skillTasks =
+            rules["Show All Skill Tasks"] &&
+            allSkillTaskArrSaved &&
+            allSkillTaskArrSaved[skill]
+              ? allSkillTaskArrSaved[skill]
+              : [tempChallengeArr[skill]];
+          sortSkillTasksByLevel(skill, skillTasks).forEach((skillTaskRaw) => {
+            let skillTask = skillTaskRaw;
+            let boost = 0;
+            if (!!skillTaskRaw && skillTaskRaw.match(/\{[0-9]+\}/g)) {
+              skillTask = skillTaskRaw.replaceAll(/\{[0-9]+\}/g, "");
+              boost = skillTaskRaw.match(/\{[0-9]+\}/g)[0].match(/\d+/)[0];
+            }
+            if (boost === 0) {
+              boost =
+                globalValidsBoosts.hasOwnProperty(skill) &&
+                globalValidsBoosts[skill].hasOwnProperty(skillTask)
+                  ? globalValidsBoosts[skill][skillTask]
+                  : 0;
+            }
+            let hasAlts =
+              Object.keys(globalValids[skill]).filter(
+                (chal) =>
+                  globalValids[skill][chal] -
                     (globalValidsBoosts.hasOwnProperty(skill) &&
-                    globalValidsBoosts[skill].hasOwnProperty(skillTask)
-                      ? globalValidsBoosts[skill][skillTask]
-                      : 0) &&
-                chal !== skillTask &&
-                (!backlog.hasOwnProperty(skill) ||
-                  !backlog[skill].hasOwnProperty(chal)),
-            ).length > 0;
-          if (
-            !!skillTask &&
-            (!backlog[skill] ||
-              (!backlog[skill].hasOwnProperty(skillTask) &&
-                !backlog[skill].hasOwnProperty(
-                  skillTask.replaceAll("#", "/"),
-                ))) &&
-            (!completedChallenges[skill] ||
-              (!completedChallenges[skill][skillTask] &&
-                !completedChallenges[skill][skillTask.replaceAll("#", "/")])) &&
-            (!altChallenges[skill] ||
-              !altChallenges[skill].hasOwnProperty(
-                chunkInfo["challenges"][skill][skillTask]["Level"] - boost,
-              ) ||
-              !completedChallenges[skill] ||
-              (!completedChallenges[skill][
-                altChallenges[skill][
-                  chunkInfo["challenges"][skill][skillTask]["Level"] - boost
-                ]
-              ] &&
-                !completedChallenges[skill][
+                    globalValidsBoosts[skill].hasOwnProperty(chal)
+                      ? globalValidsBoosts[skill][chal]
+                      : 0) ===
+                    globalValids[skill][skillTask] -
+                      (globalValidsBoosts.hasOwnProperty(skill) &&
+                      globalValidsBoosts[skill].hasOwnProperty(skillTask)
+                        ? globalValidsBoosts[skill][skillTask]
+                        : 0) &&
+                  chal !== skillTask &&
+                  (!backlog.hasOwnProperty(skill) ||
+                    !backlog[skill].hasOwnProperty(chal)),
+              ).length > 0;
+            if (
+              !!skillTask &&
+              (!backlog[skill] ||
+                (!backlog[skill].hasOwnProperty(skillTask) &&
+                  !backlog[skill].hasOwnProperty(
+                    skillTask.replaceAll("#", "/"),
+                  ))) &&
+              (!completedChallenges[skill] ||
+                (!completedChallenges[skill][skillTask] &&
+                  !completedChallenges[skill][
+                    skillTask.replaceAll("#", "/")
+                  ])) &&
+              (!altChallenges[skill] ||
+                !altChallenges[skill].hasOwnProperty(
+                  chunkInfo["challenges"][skill][skillTask]["Level"] - boost,
+                ) ||
+                !completedChallenges[skill] ||
+                (!completedChallenges[skill][
                   altChallenges[skill][
                     chunkInfo["challenges"][skill][skillTask]["Level"] - boost
-                  ].replaceAll("#", "/")
-                ]))
-          ) {
+                  ]
+                ] &&
+                  !completedChallenges[skill][
+                    altChallenges[skill][
+                      chunkInfo["challenges"][skill][skillTask]["Level"] -
+                        boost
+                    ].replaceAll("#", "/")
+                  ]))
+            ) {
             if (
               !!skillTask &&
               !!altChallenges[skill] &&
@@ -10969,6 +11035,18 @@ let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
                 chunkInfo["challenges"][skill][skillTask]["Level"] - boost
               ]
             ) {
+              let displayedSkillTask =
+                altChallenges[skill][
+                  chunkInfo["challenges"][skill][skillTask]["Level"] - boost
+                ];
+              if (
+                renderedSkillTasks[skill] &&
+                renderedSkillTasks[skill][displayedSkillTask]
+              ) {
+                return;
+              }
+              !renderedSkillTasks[skill] && (renderedSkillTasks[skill] = {});
+              renderedSkillTasks[skill][displayedSkillTask] = true;
               let newBoost =
                 globalValidsBoosts.hasOwnProperty(skill) &&
                 globalValidsBoosts[skill].hasOwnProperty(
@@ -10984,7 +11062,7 @@ let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
                     ]
                   : 0;
               challengeArr.push(
-                `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]] && "hide-backlog"} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}" onclick="showDetails('${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}', '${skill}', 'current')"><label class="checkbox noscroll ${!testMode && (viewOnly || inEntry || locked) ? "checkbox--disabled" : ""}"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]] ? "checked" : ""} class='noscroll' onclick="checkOffChallenge('${skill}', '${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}')" ${!testMode && (viewOnly || inEntry || locked) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${newBoost > 0 ? (chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost <= 0 ? 1 : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost) + "] (+" + newBoost + ")" : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] + "]"} <span class="inner noscroll">${skill}</b>: ${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[0])}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("|")[1])}" target="_blank">${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[1].split("|").join(""))}</a>${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[2])}</span></span></label> <span class="burger noscroll${!testMode && (viewOnly || inEntry || locked) ? " hidden-burger" : ""}" onclick="openActiveContextMenu('${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}', '${skill}', ${hasAlts})"><i class="fa-solid fa-sliders-h noscroll">${hasAlts ? `<i class="fa-solid fa-star burger-star noscroll"></i>` : ""}</i></span></div>`,
+                `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]] && "hide-backlog"} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}" onclick="showDetails('${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}', '${skill}', 'current')"><label class="checkbox noscroll ${!testMode && (viewOnly || inEntry || locked) ? "checkbox--disabled" : ""}"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]] ? "checked" : ""} class='noscroll' onclick="checkOffChallenge('${skill}', '${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}')" ${!testMode && (viewOnly || inEntry || locked) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${newBoost > 0 ? (chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost <= 0 ? 1 : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost) + "] (+" + newBoost + ")" : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] + "]"} <span class="inner noscroll">${skill}</b>: ${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[0])}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("|")[1])}" target="_blank">${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[1].split("|").join(""))}</a>${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[2])}</span></span></label> <span class="burger noscroll${!testMode && (viewOnly || inEntry || locked) ? " hidden-burger" : ""}" onclick="openActiveContextMenu('${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}', '${skill}', ${hasAlts})"><i class="fa-solid fa-sliders-h noscroll">${hasAlts ? `<i class="fa-solid fa-star burger-star noscroll"></i>` : ""}</i></span></div>`,
               );
               listOfTasks.push({
                 [altChallenges[skill][
@@ -10992,29 +11070,39 @@ let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
                 ]]: skill,
                 prefix: `[${newBoost > 0 ? (chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost <= 0 ? 1 : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost) + "] (+" + newBoost + ")" : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] + "]"} ${skill}:`,
               });
-              activeTasks[skill] = {
-                [altChallenges[skill][
+              !activeTasks[skill] && (activeTasks[skill] = {});
+              activeTasks[skill][
+                altChallenges[skill][
                   chunkInfo["challenges"][skill][skillTask]["Level"] - boost
-                ]]:
-                  `${chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"]}${newBoost > 0 ? `{${newBoost}}` : ""}`,
-              };
+                ]
+              ] =
+                `${chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"]}${newBoost > 0 ? `{${newBoost}}` : ""}`;
             } else if (
               !!skillTask &&
               !!chunkInfo["challenges"][skill][skillTask]
             ) {
+              if (
+                renderedSkillTasks[skill] &&
+                renderedSkillTasks[skill][skillTask]
+              ) {
+                return;
+              }
+              !renderedSkillTasks[skill] && (renderedSkillTasks[skill] = {});
+              renderedSkillTasks[skill][skillTask] = true;
               challengeArr.push(
-                `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] && "hide-backlog"} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}" onclick="showDetails('${encodeRFC5987ValueChars(skillTask)}', '${skill}', 'current')"><label class="checkbox noscroll ${!testMode && (viewOnly || inEntry || locked) ? "checkbox--disabled" : ""}"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "checked" : ""} class='noscroll' onclick="checkOffChallenge('${skill}', '${encodeRFC5987ValueChars(skillTask)}')" ${!testMode && (viewOnly || inEntry || locked) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${boost > 0 ? (chunkInfo["challenges"][skill][skillTask]["Level"] - boost <= 0 ? 1 : chunkInfo["challenges"][skill][skillTask]["Level"] - boost) + "] (+" + boost + ")" : chunkInfo["challenges"][skill][skillTask]["Level"] + "]"} <span class="inner noscroll">${skill}</b>: ${skillTask.split("~")[0]}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(skillTask.split("|")[1])}" target="_blank">${skillTask.split("~")[1].split("|").join("")}</a>${skillTask.split("~")[2]}</span></span></label> <span class="burger noscroll${!testMode && (viewOnly || inEntry || locked) ? " hidden-burger" : ""}" onclick="openActiveContextMenu('${encodeRFC5987ValueChars(skillTask)}', '${skill}', ${hasAlts})"><i class="fa-solid fa-sliders-h noscroll">${hasAlts ? `<i class="fa-solid fa-star burger-star noscroll"></i>` : ""}</i></span></div>`,
+                `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, skillTask)} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] && "hide-backlog"} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}" onclick="showDetails('${encodeRFC5987ValueChars(skillTask)}', '${skill}', 'current')"><label class="checkbox noscroll ${!testMode && (viewOnly || inEntry || locked) ? "checkbox--disabled" : ""}"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "checked" : ""} class='noscroll' onclick="checkOffChallenge('${skill}', '${encodeRFC5987ValueChars(skillTask)}')" ${!testMode && (viewOnly || inEntry || locked) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${boost > 0 ? (chunkInfo["challenges"][skill][skillTask]["Level"] - boost <= 0 ? 1 : chunkInfo["challenges"][skill][skillTask]["Level"] - boost) + "] (+" + boost + ")" : chunkInfo["challenges"][skill][skillTask]["Level"] + "]"} <span class="inner noscroll">${skill}</b>: ${skillTask.split("~")[0]}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(skillTask.split("|")[1])}" target="_blank">${skillTask.split("~")[1].split("|").join("")}</a>${skillTask.split("~")[2]}</span></span></label> <span class="burger noscroll${!testMode && (viewOnly || inEntry || locked) ? " hidden-burger" : ""}" onclick="openActiveContextMenu('${encodeRFC5987ValueChars(skillTask)}', '${skill}', ${hasAlts})"><i class="fa-solid fa-sliders-h noscroll">${hasAlts ? `<i class="fa-solid fa-star burger-star noscroll"></i>` : ""}</i></span></div>`,
               );
               listOfTasks.push({
                 [skillTask]: skill,
                 prefix: `[${boost > 0 ? (chunkInfo["challenges"][skill][skillTask]["Level"] - boost <= 0 ? 1 : chunkInfo["challenges"][skill][skillTask]["Level"] - boost) + "] (+" + boost + ")" : chunkInfo["challenges"][skill][skillTask]["Level"] + "]"} ${skill}:`,
               });
-              activeTasks[skill] = {
-                [skillTask]: `${chunkInfo["challenges"][skill][skillTask]["Level"]}${boost > 0 ? `{${boost}}` : ""}`,
-              };
+              !activeTasks[skill] && (activeTasks[skill] = {});
+              activeTasks[skill][skillTask] =
+                `${chunkInfo["challenges"][skill][skillTask]["Level"]}${boost > 0 ? `{${boost}}` : ""}`;
             }
           }
         });
+      });
     rules["Show Skill Tasks"] &&
       Object.keys(highestCurrent).forEach((skill) => {
         if (
@@ -12059,22 +12147,24 @@ let setupCurrentChallengesFromSaved = function () {
     .filter((skill) => skillNames.includes(skill))
     .sort()
     .forEach((skill) => {
-      let skillTask = Object.keys(activeTasks[skill])[0];
-      if (!skillTask) return;
-      let level;
-      let boost;
-      if (activeTasks[skill][skillTask].match(/\{[0-9]+\}/g)) {
-        level = activeTasks[skill][skillTask].split("{")[0];
-        boost = activeTasks[skill][skillTask]
-          .match(/\{[0-9]+\}/g)[0]
-          .match(/\d+/)[0];
-      } else {
-        level = activeTasks[skill][skillTask];
-        boost = 0;
-      }
-      challengeArr.push(
-        `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "hide-backlog" : ""} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}"><label class="checkbox noscroll checkbox--disabled"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "checked" : ""} class='noscroll' disabled><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${boost > 0 ? (level - boost <= 0 ? 1 : level - boost) + "] (+" + boost + ")" : level + "]"} <span class="inner noscroll">${skill}</b>: ${decodeQueryParam(skillTask.split("~")[0])}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(skillTask.split("|")[1])}" target="_blank">${decodeQueryParam(skillTask.split("~")[1].split("|").join(""))}</a>${decodeQueryParam(skillTask.split("~")[2])}</span></span></label></div>`,
-      );
+      sortSkillTasksByLevel(skill, Object.keys(activeTasks[skill]))
+        .forEach((skillTask) => {
+          if (!skillTask) return;
+          let level;
+          let boost;
+          if (activeTasks[skill][skillTask].match(/\{[0-9]+\}/g)) {
+            level = activeTasks[skill][skillTask].split("{")[0];
+            boost = activeTasks[skill][skillTask]
+              .match(/\{[0-9]+\}/g)[0]
+              .match(/\d+/)[0];
+          } else {
+            level = activeTasks[skill][skillTask];
+            boost = 0;
+          }
+          challengeArr.push(
+            `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, skillTask)} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "hide-backlog" : ""} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}"><label class="checkbox noscroll checkbox--disabled"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "checked" : ""} class='noscroll' disabled><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${boost > 0 ? (level - boost <= 0 ? 1 : level - boost) + "] (+" + boost + ")" : level + "]"} <span class="inner noscroll">${skill}</b>: ${decodeQueryParam(skillTask.split("~")[0])}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(skillTask.split("|")[1])}" target="_blank">${decodeQueryParam(skillTask.split("~")[1].split("|").join(""))}</a>${decodeQueryParam(skillTask.split("~")[2])}</span></span></label></div>`,
+          );
+        });
     });
   challengeArr = challengeArr.filter(
     (line) =>
@@ -12943,257 +13033,6 @@ let calcFutureChallenges2 = function (
   Object.keys(valids)
     .sort((a, b) => skillOrder.indexOf(a) - skillOrder.indexOf(b))
     .forEach((skill) => {
-      let highestCompletedLevel = 0;
-      let highestCompletedLevelBoost = 0;
-      !!completedChallenges[skill] &&
-        Object.keys(completedChallenges[skill]).forEach((name) => {
-          if (
-            !!chunkInfo["challenges"][skill][name] &&
-            chunkInfo["challenges"][skill][name]["Level"] >
-              highestCompletedLevel
-          ) {
-            if (
-              rules["Boosting"] &&
-              chunkInfo["codeItems"]["boostItems"].hasOwnProperty(skill) &&
-              !chunkInfo["challenges"][skill][name].hasOwnProperty("NoBoost")
-            ) {
-              let bestBoost = 0;
-              let ownsCrystalSaw = false;
-              Object.keys(chunkInfo["codeItems"]["boostItems"][skill]).forEach(
-                (boost) => {
-                  if (
-                    baseChunkDataLocal.hasOwnProperty(
-                      boost.includes("~") ? boost.split("~")[1] : "items",
-                    ) &&
-                    (baseChunkDataLocal[
-                      boost.includes("~") ? boost.split("~")[1] : "items"
-                    ].hasOwnProperty(boost.split("~")[0]) ||
-                      baseChunkDataLocal[
-                        boost.includes("~") ? boost.split("~")[1] : "items"
-                      ].hasOwnProperty(boost.split("~")[0]))
-                  ) {
-                    if (boost !== "Crystal saw") {
-                      if (
-                        typeof chunkInfo["codeItems"]["boostItems"][skill][
-                          boost
-                        ] === "string" &&
-                        chunkInfo["codeItems"]["boostItems"][skill][
-                          boost
-                        ].includes("%+")
-                      ) {
-                        let stringSplit =
-                          chunkInfo["codeItems"]["boostItems"][skill][
-                            boost
-                          ].split("%+");
-                        let possibleBoost = Math.floor(
-                          (valids[skill][name] * stringSplit[0]) / 100 +
-                            parseInt(stringSplit[1]),
-                        );
-                        possibleBoost = Math.floor(
-                          ((valids[skill][name] - possibleBoost) *
-                            stringSplit[0]) /
-                            100 +
-                            parseInt(stringSplit[1]),
-                        );
-                        if (possibleBoost > bestBoost) {
-                          bestBoost = possibleBoost;
-                        }
-                      } else if (
-                        typeof chunkInfo["codeItems"]["boostItems"][skill][
-                          boost
-                        ] === "string" &&
-                        chunkInfo["codeItems"]["boostItems"][skill][
-                          boost
-                        ].includes("xp*")
-                      ) {
-                        let stringSplit =
-                          chunkInfo["codeItems"]["boostItems"][skill][
-                            boost
-                          ].split("xp*");
-                        let tempXp = 0;
-                        let possibleBoost = 0;
-                        while (
-                          parseInt(
-                            Object.keys(xpTable).filter(
-                              (lvl) => xpTable[lvl] > tempXp,
-                            )[0],
-                          ) +
-                            possibleBoost <
-                          globalValids[skill][name]
-                        ) {
-                          tempXp += parseInt(stringSplit[0]);
-                          possibleBoost =
-                            Math.floor(tempXp / parseInt(stringSplit[0])) *
-                            parseInt(stringSplit[1]);
-                        }
-                        if (possibleBoost > bestBoost) {
-                          bestBoost = possibleBoost;
-                        }
-                      } else if (
-                        chunkInfo["codeItems"]["boostItems"][skill][boost] >
-                        bestBoost
-                      ) {
-                        bestBoost =
-                          chunkInfo["codeItems"]["boostItems"][skill][boost];
-                      }
-                    } else if (skill === "Construction") {
-                      if (
-                        chunkInfo["challenges"][skill][name].hasOwnProperty(
-                          "Items",
-                        ) &&
-                        chunkInfo["challenges"][skill][name]["Items"].includes(
-                          "Saw[+]",
-                        )
-                      ) {
-                        ownsCrystalSaw = true;
-                      }
-                    }
-                  }
-                },
-              );
-              if (
-                chunkInfo["challenges"][skill][name]["Level"] -
-                  (bestBoost + (ownsCrystalSaw ? 3 : 0)) >
-                highestCompletedLevel
-              ) {
-                highestCompletedLevel =
-                  chunkInfo["challenges"][skill][name]["Level"] -
-                  (bestBoost + (ownsCrystalSaw ? 3 : 0));
-                highestCompletedLevelBoost =
-                  bestBoost + (ownsCrystalSaw ? 3 : 0);
-              }
-            } else {
-              highestCompletedLevel =
-                chunkInfo["challenges"][skill][name]["Level"];
-            }
-          }
-        });
-      if (!!highestCurrent[skill]) {
-        if (
-          rules["Boosting"] &&
-          chunkInfo["codeItems"]["boostItems"].hasOwnProperty(skill) &&
-          !!highestCurrent[skill] &&
-          !!chunkInfo["challenges"][skill][highestCurrent[skill]] &&
-          !chunkInfo["challenges"][skill][highestCurrent[skill]].hasOwnProperty(
-            "NoBoost",
-          )
-        ) {
-          let bestBoost = 0;
-          let ownsCrystalSaw = false;
-          Object.keys(chunkInfo["codeItems"]["boostItems"][skill]).forEach(
-            (boost) => {
-              if (
-                baseChunkDataLocal.hasOwnProperty(
-                  boost.includes("~") ? boost.split("~")[1] : "items",
-                ) &&
-                (baseChunkDataLocal[
-                  boost.includes("~") ? boost.split("~")[1] : "items"
-                ].hasOwnProperty(boost.split("~")[0]) ||
-                  baseChunkDataLocal[
-                    boost.includes("~") ? boost.split("~")[1] : "items"
-                  ].hasOwnProperty(boost.split("~")[0]))
-              ) {
-                if (boost !== "Crystal saw") {
-                  if (
-                    typeof chunkInfo["codeItems"]["boostItems"][skill][
-                      boost
-                    ] === "string" &&
-                    chunkInfo["codeItems"]["boostItems"][skill][boost].includes(
-                      "%+",
-                    )
-                  ) {
-                    let stringSplit =
-                      chunkInfo["codeItems"]["boostItems"][skill][boost].split(
-                        "%+",
-                      );
-                    let possibleBoost = Math.floor(
-                      (valids[skill][highestCurrent[skill]] * stringSplit[0]) /
-                        100 +
-                        parseInt(stringSplit[1]),
-                    );
-                    possibleBoost = Math.floor(
-                      ((valids[skill][highestCurrent[skill]] - possibleBoost) *
-                        stringSplit[0]) /
-                        100 +
-                        parseInt(stringSplit[1]),
-                    );
-                    if (possibleBoost > bestBoost) {
-                      bestBoost = possibleBoost;
-                    }
-                  } else if (
-                    typeof chunkInfo["codeItems"]["boostItems"][skill][
-                      boost
-                    ] === "string" &&
-                    chunkInfo["codeItems"]["boostItems"][skill][boost].includes(
-                      "xp*",
-                    )
-                  ) {
-                    let stringSplit =
-                      chunkInfo["codeItems"]["boostItems"][skill][boost].split(
-                        "xp*",
-                      );
-                    let tempXp = 0;
-                    let possibleBoost = 0;
-                    while (
-                      parseInt(
-                        Object.keys(xpTable).filter(
-                          (lvl) => xpTable[lvl] > tempXp,
-                        )[0],
-                      ) +
-                        possibleBoost <
-                      globalValids[skill][highestCurrent[skill]]
-                    ) {
-                      tempXp += parseInt(stringSplit[0]);
-                      possibleBoost =
-                        Math.floor(tempXp / parseInt(stringSplit[0])) *
-                        parseInt(stringSplit[1]);
-                    }
-                    if (possibleBoost > bestBoost) {
-                      bestBoost = possibleBoost;
-                    }
-                  } else if (
-                    chunkInfo["codeItems"]["boostItems"][skill][boost] >
-                    bestBoost
-                  ) {
-                    bestBoost =
-                      chunkInfo["codeItems"]["boostItems"][skill][boost];
-                  }
-                } else if (skill === "Construction") {
-                  if (
-                    chunkInfo["challenges"][skill][
-                      highestCurrent[skill]
-                    ].hasOwnProperty("Items") &&
-                    chunkInfo["challenges"][skill][highestCurrent[skill]][
-                      "Items"
-                    ].includes("Saw[+]")
-                  ) {
-                    ownsCrystalSaw = true;
-                  }
-                }
-              }
-            },
-          );
-          if (
-            !!valids[skill] &&
-            valids[skill][highestCurrent[skill]] -
-              (bestBoost + (ownsCrystalSaw ? 3 : 0)) >
-              highestCompletedLevel
-          ) {
-            highestCompletedLevel =
-              chunkInfo["challenges"][skill][highestCurrent[skill]]["Level"] -
-              (bestBoost + (ownsCrystalSaw ? 3 : 0));
-            highestCompletedLevelBoost = bestBoost + (ownsCrystalSaw ? 3 : 0);
-          }
-        } else {
-          if (
-            !!valids[skill] &&
-            valids[skill][highestCurrent[skill]] > highestCompletedLevel
-          ) {
-            highestCompletedLevel =
-              chunkInfo["challenges"][skill][highestCurrent[skill]]["Level"];
-          }
-        }
-      }
       checkPrimaryMethod(skill, valids, baseChunkDataLocal) &&
         Object.keys(valids[skill]).forEach((challenge) => {
           if (!chunkInfo["challenges"][skill].hasOwnProperty(challenge)) {
@@ -13416,12 +13255,10 @@ let calcFutureChallenges2 = function (
           } else {
             if (
               valids[skill][challenge] !== false &&
-              (chunkInfo["challenges"][skill][challenge]["Level"] - bestBoost >
-                highestCompletedLevel ||
-                highestCompletedLevel < 1) &&
               !chunkInfo["challenges"][skill][challenge]["NeverShow"] &&
               (!completedChallenges[skill] ||
-                !completedChallenges[skill][challenge])
+                (!completedChallenges[skill][challenge] &&
+                  !completedChallenges[skill][challenge.replaceAll("#", "/")]))
             ) {
               if (
                 (!highestChallenge[skill] ||
@@ -22930,30 +22767,24 @@ let backlogChallenge = function (challenge, skill, note, noUpdate) {
           backlog[subSkill][challenge] = note;
         });
     }
-    let highestCompletedLevel = 0;
-    !!completedChallenges[skill] &&
-      Object.keys(completedChallenges[skill]).forEach((name) => {
-        if (
-          chunkInfo["challenges"][skill][name] &&
-          chunkInfo["challenges"][skill][name]["Level"] > highestCompletedLevel
-        ) {
-          highestCompletedLevel = chunkInfo["challenges"][skill][name]["Level"];
-        }
-      });
     let highestChallenge;
     let highestChallengeLevel = 0;
     Object.keys(globalValids[skill]).forEach((chal) => {
+      let isCompletedSkillTask =
+        !!completedChallenges[skill] &&
+        (completedChallenges[skill][chal] ||
+          completedChallenges[skill][chal.replaceAll("#", "/")]);
       if (
+        !isCompletedSkillTask &&
         (!backlog[skill] || !backlog[skill].hasOwnProperty(chal)) &&
-        globalValids[skill][chal] > highestChallengeLevel &&
-        globalValids[skill][chal] > highestCompletedLevel
+        globalValids[skill][chal] > highestChallengeLevel
       ) {
         highestChallenge = chal;
         highestChallengeLevel = globalValids[skill][chal];
       } else if (
+        !isCompletedSkillTask &&
         (!backlog[skill] || !backlog[skill].hasOwnProperty(chal)) &&
         globalValids[skill][chal] === highestChallengeLevel &&
-        globalValids[skill][chal] > highestCompletedLevel &&
         (!highestChallenge ||
           !chunkInfo["challenges"][skill][highestChallenge]["Priority"] ||
           (!!chunkInfo["challenges"][skill][chal]["Priority"] &&
