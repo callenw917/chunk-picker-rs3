@@ -1,0 +1,43 @@
+{
+  "rules": {
+    "underMaintenance": { ".read": true, ".write": false },
+    "version": { ".read": true, ".write": false },
+    "versionEnforced": { ".read": true, ".write": false },
+    "template": { ".read": true, ".write": false },
+
+    "mapids": {
+      ".read": true,
+      "$mid": {
+        ".write": "auth != null"
+      }
+    },
+
+    "mapCreationTimes": {
+      ".read": true,
+      "$mid": {
+        ".write": "auth != null && root.child('maps').child($mid).child('uid').val() == auth.uid"
+      }
+    },
+
+    "maps": {
+      "$mid": {
+        ".read": true,
+        ".write": "auth != null && ((!data.exists() && newData.child('uid').val() == auth.uid) || data.child('uid').val() == auth.uid || newData.child('uid').val() == auth.uid)"
+      }
+    },
+
+    "highscores": {
+      ".read": true,
+      "players": {
+        "$name": {
+          ".write": "auth != null"
+        }
+      }
+    },
+
+    "errorlogs": {
+      ".read": false,
+      ".write": true
+    }
+  }
+}

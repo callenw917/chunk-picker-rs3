@@ -14,15 +14,6 @@
   <meta name="description" content="The Chunk Picker RS3 is an all-in-one companion tool to the Runescape 3 unofficial gamemode: OneChunkMan. The site allows you to randomly roll chunks, get chunk tasks, and track and share your progress with others.">
   <meta name="author" content="Source Chunk">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
-  <meta property="og:url" content="https://source-chunk.github.io/chunk-picker-rs3/">
-  <meta property="og:image" content="./source-chunk-avatar.png">
-  <meta property="og:description" content="The Chunk Picker RS3 is an all-in-one companion tool to the Runescape 3 unofficial gamemode: OneChunkMan. The site allows you to randomly roll chunks, get chunk tasks, and track and share your progress with others.">
-  <meta property="og:title" content="Chunk Picker RS3">
-  <meta name="twitter:card" content="summary">
-  <meta property="og:url" content="https://source-chunk.github.io/chunk-picker-rs3/">
-  <meta name="twitter:title" content="Chunk Picker RS3">
-  <meta name="twitter:description" content="The Chunk Picker RS3 is an all-in-one companion tool to the Runescape 3 unofficial gamemode: OneChunkMan. The site allows you to randomly roll chunks, get chunk tasks, and track and share your progress with others.">
-  <meta name="twitter:image" content="./source-chunk-avatar.png">
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-easing/1.3/jquery.easing.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.10/lodash.min.js"></script>
@@ -34,14 +25,24 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.3/purify.min.js"></script>
   <script>
-    var firebaseConfig = {
-      apiKey: "AIzaSyAiqvRtnf0N2y9DC-uuNXudsc7xNoDRryI",
-      authDomain: "chunkpickerrs3.firebaseapp.com",
-      databaseURL: "https://chunkpickerrs3.firebaseio.com",
-      projectId: "chunkpickerrs3",
-      storageBucket: "chunkpickerrs3.appspot.com",
-      messagingSenderId: "374193749553",
-      appId: "1:374193749553:web:1d00c90aa5c63cbc939f10"
+    // var firebaseConfig = {
+    //   apiKey: "AIzaSyAiqvRtnf0N2y9DC-uuNXudsc7xNoDRryI",
+    //   authDomain: "chunkpickerrs3.firebaseapp.com",
+    //   databaseURL: "https://chunkpickerrs3.firebaseio.com",
+    //   projectId: "chunkpickerrs3",
+    //   storageBucket: "chunkpickerrs3.appspot.com",
+    //   messagingSenderId: "374193749553",
+    //   appId: "1:374193749553:web:1d00c90aa5c63cbc939f10"
+    // };
+    const firebaseConfig = {
+      apiKey: "AIzaSyCS2DD1b43xx2OG0rSCq9fw1by-W4nUnnE",
+      authDomain: "rs-chunk-picker.firebaseapp.com",
+      databaseURL: "https://rs-chunk-picker-default-rtdb.firebaseio.com/",
+      projectId: "rs-chunk-picker",
+      storageBucket: "rs-chunk-picker.firebasestorage.app",
+      messagingSenderId: "542965724395",
+      appId: "1:542965724395:web:caa2c529cd533080e5faae",
+      measurementId: "G-YNS0WM0YP9"
     };
     firebase.initializeApp(firebaseConfig);
   </script>

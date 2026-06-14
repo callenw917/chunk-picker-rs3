@@ -1,0 +1,44 @@
+{
+  "underMaintenance": false,
+  "versionEnforced": false,
+  "version": "6.9.55",
+  "mapids": {
+    "seed": true
+  },
+  "mapCreationTimes": {
+    "seed": 0
+  },
+  "highscores": {
+    "players": {
+      "seed": "seed"
+    }
+  },
+  "template": {
+    "settings": {
+      "recent": true,
+      "help": true,
+      "chunkTasks": true,
+      "topButtons": true,
+      "info": true,
+      "mapIntro": false
+    },
+    "recentFancyRollTime": 0,
+    "topbarSelection": [
+      "Help",
+      "Patreon",
+      "Map Notes",
+      "Patch Notes",
+      "Discord",
+      "Report a Bug",
+      "WiseOldMan",
+      "Settings"
+    ],
+    "activeSubTabs": {
+      "skill": true,
+      "bis": true,
+      "quest": true,
+      "diary": true,
+      "extra": true
+    }
+  }
+}
