@@ -380,6 +380,7 @@ let rules = {
   "Show Diary Tasks Complete": false,
   "Show Diary Tasks Any": false,
   "Highest Level": false,
+  "Progressive Skill Caps": false,
   "BIS Skilling": false,
   "BIS Skilling Consumables": false,
   "BIS Skilling Relics": false,
@@ -539,6 +540,8 @@ let ruleNames = {
     "Show all Area Tasks achievements possible, regardless of tier<span class='rule-asterisk noscroll'>*</span>",
   "Highest Level":
     "Require processing skill tasks to be the highest level of processing, rather than the lowest (e.g. must fletch yew logs into an unstrung shieldbow rather than arrow shafts)<span class='rule-asterisk noscroll'>*</span>",
+  "Progressive Skill Caps":
+    "Limit skill task obligations through live caps derived from available primary training methods.",
   "BIS Skilling":
     "Must obtain items that are best-in-slot/add quality-of-life for skilling (e.g. Pickaxe of Life and Death, Elite skilling outfits, Seed bag, etc.)",
   "BIS Skilling Consumables":
@@ -775,6 +778,39 @@ let rulePresets = {
     "Primary Spawn": true,
     "Secondary Bird Nests": true,
   },
+  "Progressive Skill Caps": {
+    "Rare Drop": true,
+    Boss: true,
+    "Show Skill Tasks": true,
+    "Show Quest Tasks": true,
+    "Show Diary Tasks": true,
+    "Show Best in Slot Tasks": true,
+    "Show Best in Slot Prayer Tasks": true,
+    Minigame: true,
+    "Shortcut Task": true,
+    Shortcut: true,
+    "Puro-Puro": true,
+    Bakami: true,
+    Spells: true,
+    "Combat and Teleport Spells": true,
+    "Smithing by Smelting": true,
+    "Rare Drop Amount": "0",
+    "Secondary Primary Amount": "1",
+    Ogleroot: true,
+    Achievement: true,
+    "Cleaning Herbs": true,
+    "Unlock Abilities": true,
+    "Unlock Prayers": true,
+    "Material Blueprints": true,
+    Achievement: true,
+    "Slayer Contracts": true,
+    "Cleaning Herbs Primary": true,
+    Uncharted: true,
+    Vinesweeper: true,
+    "Primary Spawn": true,
+    "Secondary Bird Nests": true,
+    "Progressive Skill Caps": true,
+  },
   "Extreme Chunker": {
     Skillcape: true,
     "Rare Drop": true,
@@ -973,6 +1009,7 @@ let rulePresets = {
 
 let rulePresetFlavor = {
   "Vanilla Chunker": "The original ruleset",
+  "Progressive Skill Caps": "Skill goals grow with your chunks",
   "Extreme Chunker": "Only worse, never better",
   "Supreme Chunker": "More like Sup-meme!",
 }; // Preset flavour text
@@ -1010,6 +1047,7 @@ let ruleStructure = {
   "Overall Skill": {
     Skillcape: ["Master skillcape"],
     "Highest Level": true,
+    "Progressive Skill Caps": true,
     "Multi Step Processing": ["Hide Partial Products"],
     "Wield Crafted Items": ["Wield Crafted Items Override"],
     "Secondary Primary": true,
