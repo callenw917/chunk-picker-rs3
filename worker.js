@@ -349,6 +349,9 @@ onmessage = function(e) {
         type === 'current' && postMessage({ type: 'loading-update', percentage: '5%' });
         globalValids = calcChallenges(chunks, baseChunkData);
         baseChunkData = tempChunkData;
+        if (type === 'current' && rules["Progressive Skill Caps"]) {
+            console.log('progressiveSkillCaps v6.9.57', calculateProgressiveSkillCaps(globalValids));
+        }
         type === 'current' && postMessage({ type: 'loading-update', percentage: '95%' });
         highestOverall = calcBIS();
         
@@ -9683,6 +9686,141 @@ let calcBIS = function(completedOnly) {
 }
 
 let allSkillTaskArr = {};
+
+let isTaskBacklogged = function(skill, task) {
+    return !!backlog[skill] && (backlog[skill].hasOwnProperty(task) || backlog[skill].hasOwnProperty(task.replaceAll('#', '/')));
+};
+
+let isTaskCompleted = function(skill, task) {
+    return !!completedChallenges[skill] && (completedChallenges[skill].hasOwnProperty(task) || completedChallenges[skill][task.replaceAll('#', '/')]);
+};
+
+let getEffectiveSkillTaskLevel = function(skill, task) {
+    if (!chunkInfo['challenges'].hasOwnProperty(skill) || !chunkInfo['challenges'][skill].hasOwnProperty(task) || !chunkInfo['challenges'][skill][task].hasOwnProperty('Level')) {
+        return null;
+    }
+    let level = chunkInfo['challenges'][skill][task]['Level'];
+    if (rules["Boosting"] && chunkInfo['codeItems']['boostItems'].hasOwnProperty(skill) && !chunkInfo['challenges'][skill][task].hasOwnProperty('NoBoost')) {
+        let bestBoost = 0;
+        let ownsCrystalSaw = false;
+        Object.keys(chunkInfo['codeItems']['boostItems'][skill]).forEach((boost) => {
+            if (baseChunkData.hasOwnProperty(boost.includes('~') ? boost.split('~')[1] : 'items') && (baseChunkData[boost.includes('~') ? boost.split('~')[1] : 'items'].hasOwnProperty(boost.split('~')[0]) || baseChunkData[boost.includes('~') ? boost.split('~')[1] : 'items'].hasOwnProperty(boost.split('~')[0]))) {
+                if (!chunkInfo['codeItems']['boostTaskBans'] || !chunkInfo['codeItems']['boostTaskBans'].hasOwnProperty(skill) || !chunkInfo['codeItems']['boostTaskBans'][skill].hasOwnProperty(task) || !chunkInfo['codeItems']['boostTaskBans'][skill][task].includes(boost)) {
+                    if (boost !== 'Crystal saw') {
+                        if (typeof chunkInfo['codeItems']['boostItems'][skill][boost] === 'string' && chunkInfo['codeItems']['boostItems'][skill][boost].includes('%+')) {
+                            let stringSplit = chunkInfo['codeItems']['boostItems'][skill][boost].split('%+');
+                            let possibleBoost = Math.floor(level * stringSplit[0] / 100 + parseInt(stringSplit[1]));
+                            possibleBoost = Math.floor((level - possibleBoost) * stringSplit[0] / 100 + parseInt(stringSplit[1]));
+                            if (possibleBoost > bestBoost) {
+                                bestBoost = possibleBoost;
+                            }
+                        } else if (typeof chunkInfo['codeItems']['boostItems'][skill][boost] === 'string' && chunkInfo['codeItems']['boostItems'][skill][boost].includes('xp*')) {
+                            let stringSplit = chunkInfo['codeItems']['boostItems'][skill][boost].split('xp*');
+                            let tempXp = 0;
+                            let possibleBoost = 0;
+                            while (parseInt(Object.keys(xpTable).filter(lvl => xpTable[lvl] > tempXp)[0]) + possibleBoost < level) {
+                                tempXp += parseInt(stringSplit[0]);
+                                possibleBoost = Math.floor(tempXp / parseInt(stringSplit[0])) * parseInt(stringSplit[1]);
+                            }
+                            if (possibleBoost > bestBoost) {
+                                bestBoost = possibleBoost;
+                            }
+                        } else if (chunkInfo['codeItems']['boostItems'][skill][boost] > bestBoost) {
+                            bestBoost = chunkInfo['codeItems']['boostItems'][skill][boost];
+                        }
+                    } else if (skill === 'Construction') {
+                        if (chunkInfo['challenges'][skill][task].hasOwnProperty('Items') && chunkInfo['challenges'][skill][task]['Items'].includes('Saw[+]')) {
+                            ownsCrystalSaw = true;
+                        }
+                    }
+                }
+            }
+        });
+        level -= bestBoost + (ownsCrystalSaw ? 3 : 0);
+    }
+    return Math.max(level, 1);
+};
+
+let isProgressiveCapAnchor = function(valids, skill, task) {
+    let challenge = chunkInfo['challenges'].hasOwnProperty(skill) && chunkInfo['challenges'][skill].hasOwnProperty(task) ? chunkInfo['challenges'][skill][task] : null;
+    let allowsSecondaryStarter = skill === 'Herblore' &&
+        !!challenge &&
+        challenge['Level'] === 1 &&
+        !!challenge['Category'] &&
+        challenge['Category'].includes('Cleaning Herbs Primary') &&
+        rules['Cleaning Herbs Primary'];
+    return !!valids[skill] &&
+        valids[skill][task] !== false &&
+        !!challenge &&
+        challenge['Primary'] &&
+        (!challenge['Secondary'] || allowsSecondaryStarter) &&
+        !challenge['NeverShow'] &&
+        !isTaskBacklogged(skill, task);
+};
+
+let shouldReplaceProgressiveCapAnchor = function(capInfo, targetCap, anchorLevel, task) {
+    if (targetCap > capInfo.cap) {
+        return true;
+    }
+    if (targetCap !== capInfo.cap) {
+        return false;
+    }
+    if (!capInfo.anchorTask || capInfo.anchorLevel === null || anchorLevel < capInfo.anchorLevel) {
+        return true;
+    }
+    return anchorLevel === capInfo.anchorLevel && task.localeCompare(capInfo.anchorTask, 'en', { numeric: true }) < 0;
+};
+
+let calculateProgressiveSkillCaps = function(valids) {
+    let progressiveCombatSkills = Array.isArray(combatSkills) ? combatSkills : ['Attack', 'Strength', 'Defence', 'Constitution', 'Ranged', 'Magic', 'Prayer', 'Summoning', 'Necromancy'];
+    let progressiveSkillCaps = {};
+    skillNames.forEach((skill) => {
+        let starterCap = progressiveCombatSkills.includes(skill) || skill === 'Combat' ? 15 : 1;
+        progressiveSkillCaps[skill] = {
+            cap: starterCap,
+            anchorTask: null,
+            anchorLevel: null,
+            starterCeiling: starterCap === 15
+        };
+    });
+
+    let changed = true;
+    while (changed) {
+        changed = false;
+        skillNames.forEach((skill) => {
+            if (!valids.hasOwnProperty(skill)) {
+                return;
+            }
+            Object.keys(valids[skill]).filter((task) => isProgressiveCapAnchor(valids, skill, task)).map((task) => {
+                return {
+                    task,
+                    anchorLevel: getEffectiveSkillTaskLevel(skill, task)
+                };
+            }).filter((anchor) => anchor.anchorLevel !== null).sort((a, b) => {
+                let levelDiff = a.anchorLevel - b.anchorLevel;
+                return levelDiff !== 0 ? levelDiff : a.task.localeCompare(b.task, 'en', { numeric: true });
+            }).forEach((anchor) => {
+                let capInfo = progressiveSkillCaps[skill];
+                if (anchor.anchorLevel > capInfo.cap) {
+                    return;
+                }
+                let starterCeiling = anchor.anchorLevel === 1;
+                let targetCap = starterCeiling ? 15 : anchor.anchorLevel + 10;
+                if (shouldReplaceProgressiveCapAnchor(capInfo, targetCap, anchor.anchorLevel, anchor.task)) {
+                    changed = changed || targetCap > capInfo.cap;
+                    progressiveSkillCaps[skill] = {
+                        cap: targetCap,
+                        anchorTask: anchor.task,
+                        anchorLevel: anchor.anchorLevel,
+                        starterCeiling
+                    };
+                }
+            });
+        });
+    }
+
+    return progressiveSkillCaps;
+};
 
 // Calcs the current challenges to be displayed
 let calcCurrentChallenges2 = function() {

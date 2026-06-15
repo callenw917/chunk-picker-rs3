@@ -6198,7 +6198,7 @@ let calcCurrentChallengesCanvas = function (
       true,
     );
     myWorker.terminate();
-    myWorker = new Worker("./worker.js?v=6.9.55");
+    myWorker = new Worker("./worker.js?v=6.9.57");
     myWorker.onmessage = workerOnMessage;
     myWorker.postMessage({
       type: "current",
@@ -6690,8 +6690,8 @@ $(document).ready(function () {
 // ------------------------------------------------------------
 
 // Recieve message from worker
-let myWorker = new Worker("./worker.js?v=6.9.55");
-let myWorker2 = new Worker("./worker.js?v=6.9.55");
+let myWorker = new Worker("./worker.js?v=6.9.57");
+let myWorker2 = new Worker("./worker.js?v=6.9.57");
 let workerOnMessage = function (e) {
   if (e.data.type === "reload") {
     window.location.reload();
@@ -12944,7 +12944,7 @@ let calcFutureChallenges = function () {
   }
   tempSections = combineJSONs(tempSections, manualSections);
   myWorker2.terminate();
-  myWorker2 = new Worker("./worker.js?v=6.9.55");
+  myWorker2 = new Worker("./worker.js?v=6.9.57");
   myWorker2.onmessage = workerOnMessage;
   myWorker2.postMessage({
     type: "future",
@@ -22767,6 +22767,28 @@ let backlogChallenge = function (challenge, skill, note, noUpdate) {
           backlog[subSkill][challenge] = note;
         });
     }
+    if (rules["Show All Skill Tasks"]) {
+      let removeSkillTaskRow = function (rowSkill, rowChallenge) {
+        let rowClass = getSkillChallengeClass(rowSkill, rowChallenge);
+        challengeArr = challengeArr.filter((line) => !line.includes(rowClass));
+        $(
+          `.panel-active .challenge.skill-challenge.${rowSkill + "-challenge"}.${rowClass}`,
+        ).remove();
+        if (activeTasks[rowSkill] && activeTasks[rowSkill][rowChallenge]) {
+          delete activeTasks[rowSkill][rowChallenge];
+          Object.keys(activeTasks[rowSkill]).length === 0 &&
+            delete activeTasks[rowSkill];
+        }
+      };
+      removeSkillTaskRow(skill, challenge);
+      if (!!chunkInfo["challenges"][skill][challenge]["Skills"]) {
+        Object.keys(chunkInfo["challenges"][skill][challenge]["Skills"]).forEach(
+          (subSkill) => {
+            removeSkillTaskRow(subSkill, challenge);
+          },
+        );
+      }
+    } else {
     let highestChallenge;
     let highestChallengeLevel = 0;
     Object.keys(globalValids[skill]).forEach((chal) => {
@@ -22838,6 +22860,7 @@ let backlogChallenge = function (challenge, skill, note, noUpdate) {
       $(
         `.panel-active .challenge.skill-challenge.${skill + "-challenge"}`,
       ).remove();
+    }
     }
   }
   if ($(".panel-active .skill-challenge").length === 0) {
