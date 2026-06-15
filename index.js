@@ -382,6 +382,11 @@ let rules = {
   "Show Diary Tasks Any": false,
   "Highest Level": false,
   "Progressive Skill Caps": false,
+  "Chunk Skill Pace Limit": false,
+  "Chunk Skill Pace Base": "20",
+  "Chunk Skill Pace Early Per Chunk": "5",
+  "Chunk Skill Pace Threshold": "40",
+  "Chunk Skill Pace Late Per Chunk": "2",
   "BIS Skilling": false,
   "BIS Skilling Consumables": false,
   "BIS Skilling Relics": false,
@@ -492,6 +497,73 @@ let rules = {
   "Secondary Bird Nests": false,
 }; // List of rules and their on/off state
 
+let numericRuleConfig = {
+  "Kill X Amount": {
+    inputClass: "x-num-input",
+    defaultValue: "1",
+    min: 1,
+  },
+  "Rare Drop Amount": {
+    inputClass: "rare-num-input",
+    defaultValue: "0",
+    min: 0,
+  },
+  "Secondary Primary Amount": {
+    inputClass: "secondary-primary-input",
+    defaultValue: "0",
+    min: 0,
+  },
+  "Chunk Skill Pace Base": {
+    inputClass: "chunk-skill-pace-base-input",
+    label: "Base",
+    defaultValue: "20",
+    min: 0,
+  },
+  "Chunk Skill Pace Early Per Chunk": {
+    inputClass: "chunk-skill-pace-early-per-chunk-input",
+    label: "Early/chunk",
+    defaultValue: "5",
+    min: 0,
+  },
+  "Chunk Skill Pace Threshold": {
+    inputClass: "chunk-skill-pace-threshold-input",
+    label: "Threshold",
+    defaultValue: "40",
+    min: 0,
+  },
+  "Chunk Skill Pace Late Per Chunk": {
+    inputClass: "chunk-skill-pace-late-per-chunk-input",
+    label: "Late/chunk",
+    defaultValue: "2",
+    min: 0,
+  },
+};
+let chunkSkillPaceNumericRules = [
+  "Chunk Skill Pace Base",
+  "Chunk Skill Pace Early Per Chunk",
+  "Chunk Skill Pace Threshold",
+  "Chunk Skill Pace Late Per Chunk",
+];
+let isNumericRule = function (rule) {
+  return numericRuleConfig.hasOwnProperty(rule);
+};
+let normalizeNumericRuleValue = function (rule, value) {
+  let ruleConfig = numericRuleConfig[rule];
+  let parsedValue = parseInt(value, 10);
+  if (isNaN(parsedValue) || parsedValue < ruleConfig.min) {
+    parsedValue = parseInt(ruleConfig.defaultValue, 10);
+  }
+  return parsedValue.toString();
+};
+let getPresetNumericRuleValue = function (preset, rule) {
+  return normalizeNumericRuleValue(
+    rule,
+    rulePresets[preset] && rulePresets[preset].hasOwnProperty(rule)
+      ? rulePresets[preset][rule]
+      : numericRuleConfig[rule].defaultValue,
+  );
+};
+
 let ruleNames = {
   Skillcape:
     "Must obtain skillcapes<span class='rule-asterisk noscroll'>*</span>",
@@ -545,6 +617,8 @@ let ruleNames = {
     "Require processing skill tasks to be the highest level of processing, rather than the lowest (e.g. must fletch yew logs into an unstrung shieldbow rather than arrow shafts)<span class='rule-asterisk noscroll'>*</span>",
   "Progressive Skill Caps":
     "Limit skill task obligations through live caps derived from available primary training methods.",
+  "Chunk Skill Pace Limit":
+    "Limit progressive skill caps by unlocked chunk count.",
   "BIS Skilling":
     "Must obtain items that are best-in-slot/add quality-of-life for skilling (e.g. Pickaxe of Life and Death, Elite skilling outfits, Seed bag, etc.)",
   "BIS Skilling Consumables":
@@ -814,6 +888,11 @@ let rulePresets = {
     "Secondary Bird Nests": true,
     "Progressive Skill Caps": true,
     "Show All Skill Tasks": true,
+    "Chunk Skill Pace Limit": true,
+    "Chunk Skill Pace Base": "20",
+    "Chunk Skill Pace Early Per Chunk": "5",
+    "Chunk Skill Pace Threshold": "40",
+    "Chunk Skill Pace Late Per Chunk": "2",
   },
   "Extreme Chunker": {
     Skillcape: true,
@@ -1052,6 +1131,7 @@ let ruleStructure = {
     Skillcape: ["Master skillcape"],
     "Highest Level": true,
     "Progressive Skill Caps": true,
+    "Chunk Skill Pace Limit": true,
     "Multi Step Processing": ["Hide Partial Products"],
     "Wield Crafted Items": ["Wield Crafted Items Override"],
     "Secondary Primary": true,
@@ -21427,15 +21507,9 @@ let applyPreset = function (preset) {
   !!rulePresets &&
     !!rulePresets[preset] &&
     Object.keys(rules).forEach((rule) => {
-      if (rule === "Kill X Amount") {
-        rules[rule] = rulePresets[preset][rule];
-        $(".x-num-input").val(rulePresets[preset][rule]);
-      } else if (rule === "Rare Drop Amount") {
-        rules[rule] = rulePresets[preset][rule];
-        $(".rare-num-input").val(rulePresets[preset][rule]);
-      } else if (rule === "Secondary Primary Amount") {
-        rules[rule] = rulePresets[preset][rule];
-        $(".secondary-primary-input").val(rulePresets[preset][rule]);
+      if (isNumericRule(rule)) {
+        rules[rule] = getPresetNumericRuleValue(preset, rule);
+        $("." + numericRuleConfig[rule].inputClass).val(rules[rule]);
       } else {
         rules[rule] = rulePresets[preset].hasOwnProperty(rule);
         $(
@@ -21489,6 +21563,46 @@ let warnRoll2Chunk = function () {
   $("#roll2WarningModal").show();
 };
 
+let getRuleClass = function (rule) {
+  return (
+    rule
+      .replaceAll(" ", "_")
+      .replace(/[!"#$%&'()*+,.\/:;<=>?@\[\\\]\^\`{|}~]/g, "")
+      .toLowerCase() + "-rule"
+  );
+};
+
+let isRuleInputDisabled = function (category, rule) {
+  return (
+    !testMode &&
+    (viewOnly || inEntry || locked || ruleStructure[category][rule] === false)
+  );
+};
+
+let renderRuleCheckboxInput = function (category, rule) {
+  return `<span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${rules[rule] ? "checked" : ""} class='noscroll' onclick="checkOffRules()" ${isRuleInputDisabled(category, rule) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span>`;
+};
+
+let renderChunkSkillPaceInputs = function (category) {
+  let disabled = isRuleInputDisabled(category, "Chunk Skill Pace Limit")
+    ? "disabled"
+    : "";
+  return chunkSkillPaceNumericRules
+    .map((rule) => {
+      let ruleConfig = numericRuleConfig[rule];
+      let value = normalizeNumericRuleValue(rule, rules[rule]);
+      return `<span class="chunk-skill-pace-field noscroll">${ruleConfig.label}: <input type='number' class='${ruleConfig.inputClass}' min='${ruleConfig.min}' value="${value}" onchange="checkOffRules()" ${disabled} /></span>`;
+    })
+    .join(" ");
+};
+
+let renderChunkSkillPaceRule = function (category, extraClass) {
+  let disabledClass = isRuleInputDisabled(category, "Chunk Skill Pace Limit")
+    ? "checkbox--disabled"
+    : "";
+  return `<div class="rule ${extraClass || ""} ${getRuleClass("Chunk Skill Pace Limit")} noscroll"><label class="checkbox noscroll ${disabledClass}">${renderRuleCheckboxInput(category, "Chunk Skill Pace Limit")}<span class="radio__label noscroll">${ruleNames["Chunk Skill Pace Limit"]}<span class="chunk-skill-pace-inputs noscroll">${renderChunkSkillPaceInputs(category)}</span></span></label></div>`;
+};
+
 // Shows import rules modal
 let importRules = function () {
   modal.generate("rulesImportModal", onMobile);
@@ -21506,7 +21620,16 @@ let applyImportRules = function (proceed) {
       !!tempRules &&
         !!rules &&
         Object.keys(rules).forEach((rule) => {
-          rules[rule] = tempRules[rule] || false;
+          if (isNumericRule(rule)) {
+            rules[rule] = normalizeNumericRuleValue(
+              rule,
+              tempRules.hasOwnProperty(rule)
+                ? tempRules[rule]
+                : numericRuleConfig[rule].defaultValue,
+            );
+          } else {
+            rules[rule] = tempRules[rule] || false;
+          }
         });
       showRules();
       checkOffRules();
@@ -21579,6 +21702,8 @@ let searchRules = function () {
                 ` / <input type='number' class='secondary-primary-input' min='0' value="${rules["Secondary Primary Amount"]}" onchange="checkOffRules()" ${!testMode && (viewOnly || inEntry || locked || ruleStructure[category][rule] === false) ? "disabled" : ""} /> ` +
                 ruleNames[rule].split("/X")[1] +
                 "</span></div>";
+            } else if (rule === "Chunk Skill Pace Limit") {
+              ruleObj = renderChunkSkillPaceRule(category);
             } else {
               ruleObj = `<div class="rule ${
                 rule
@@ -21764,6 +21889,10 @@ let showRules = function (isPage2) {
                     ruleNames[rule].split("/X")[1] +
                     "</span></div>",
                 );
+              } else if (rule === "Chunk Skill Pace Limit") {
+                $(
+                  `.panel-${category.replaceAll(" ", "").toLowerCase()}`,
+                ).append(renderChunkSkillPaceRule(category));
               } else {
                 $(
                   `.panel-${category.replaceAll(" ", "").toLowerCase()}`,
@@ -21847,6 +21976,10 @@ let showRules = function (isPage2) {
                     ruleNames[rule].split("/X")[1] +
                     "</span></div>",
                 );
+              } else if (rule === "Chunk Skill Pace Limit") {
+                $(
+                  `.panel-${category.replaceAll(" ", "").toLowerCase()}`,
+                ).append(renderChunkSkillPaceRule(category));
               } else {
                 $(
                   `.panel-${category.replaceAll(" ", "").toLowerCase()}`,
@@ -23297,30 +23430,16 @@ let checkOffRules = function (didRedo, startup) {
         .prop("checked", subRuleDefault[rule]);
       redo = true;
     }
-    if (rule === "Kill X Amount") {
-      if (
-        $(extraFilter + ".x-num-input").val() < 1 ||
-        !$(extraFilter + ".x-num-input").val()
-      ) {
-        $(extraFilter + ".x-num-input").val(1);
-      }
-      rules[rule] = $(extraFilter + ".x-num-input").val();
-    } else if (rule === "Rare Drop Amount") {
-      if (
-        $(extraFilter + ".rare-num-input").val() < 0 ||
-        !$(extraFilter + ".rare-num-input").val()
-      ) {
-        $(extraFilter + ".rare-num-input").val(0);
-      }
-      rules[rule] = $(extraFilter + ".rare-num-input").val();
-    } else if (rule === "Secondary Primary Amount") {
-      if (
-        $(extraFilter + ".secondary-primary-input").val() < 0 ||
-        !$(extraFilter + ".secondary-primary-input").val()
-      ) {
-        $(extraFilter + ".secondary-primary-input").val(0);
-      }
-      rules[rule] = $(extraFilter + ".secondary-primary-input").val();
+    if (isNumericRule(rule)) {
+      let numericInput = $(
+        extraFilter + "." + numericRuleConfig[rule].inputClass,
+      );
+      let numericValue = normalizeNumericRuleValue(
+        rule,
+        numericInput.length ? numericInput.val() : rules[rule],
+      );
+      numericInput.length && numericInput.val(numericValue);
+      rules[rule] = numericValue;
     } else {
       rules[rule] = $(
         extraFilter +

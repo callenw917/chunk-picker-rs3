@@ -6862,6 +6862,18 @@ input#searchChunks {
     pointer-events: all;
 }
 
+.chunk-skill-pace-inputs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-left: 8px;
+}
+
+.chunk-skill-pace-field input {
+    width: 58px;
+    pointer-events: all;
+}
+
 .addEquipment {
     cursor: pointer;
     -webkit-transition-duration: 0.4s;
