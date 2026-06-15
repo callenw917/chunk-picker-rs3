@@ -6198,7 +6198,7 @@ let calcCurrentChallengesCanvas = function (
       true,
     );
     myWorker.terminate();
-    myWorker = new Worker("./worker.js?v=6.9.57");
+    myWorker = new Worker("./worker.js?v=6.9.64");
     myWorker.onmessage = workerOnMessage;
     myWorker.postMessage({
       type: "current",
@@ -6690,8 +6690,8 @@ $(document).ready(function () {
 // ------------------------------------------------------------
 
 // Recieve message from worker
-let myWorker = new Worker("./worker.js?v=6.9.57");
-let myWorker2 = new Worker("./worker.js?v=6.9.57");
+let myWorker = new Worker("./worker.js?v=6.9.64");
+let myWorker2 = new Worker("./worker.js?v=6.9.64");
 let workerOnMessage = function (e) {
   if (e.data.type === "reload") {
     window.location.reload();
@@ -10899,6 +10899,22 @@ let sortSkillTasksByLevel = function (skill, tasks) {
   });
 };
 
+let getSkillTaskDisplayHtml = function (skillTask) {
+  if (typeof skillTask !== "string") {
+    return "";
+  }
+  let skillTaskParts = skillTask.split("~");
+  if (
+    skillTaskParts.length >= 3 &&
+    skillTaskParts[1] &&
+    skillTaskParts[1].includes("|") &&
+    skillTask.split("|")[1]
+  ) {
+    return `${decodeQueryParam(skillTaskParts[0])}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(skillTask.split("|")[1])}" target="_blank">${decodeQueryParam(skillTaskParts[1].split("|").join(""))}</a>${decodeQueryParam(skillTaskParts.slice(2).join("~"))}`;
+  }
+  return decodeQueryParam(skillTask);
+};
+
 // Sets up data for displaying
 let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
   let listOfTasks = [];
@@ -10926,6 +10942,7 @@ let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
           ? { ...tempChallengeArr, ...allSkillTaskArrSaved }
           : tempChallengeArr,
       )
+        .filter((skill) => skillNames.includes(skill))
         .sort()
         .forEach((skill) => {
           let skillTasks =
@@ -11039,6 +11056,8 @@ let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
                 altChallenges[skill][
                   chunkInfo["challenges"][skill][skillTask]["Level"] - boost
                 ];
+              let displayedSkillTaskHtml =
+                getSkillTaskDisplayHtml(displayedSkillTask);
               if (
                 renderedSkillTasks[skill] &&
                 renderedSkillTasks[skill][displayedSkillTask]
@@ -11062,7 +11081,7 @@ let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
                     ]
                   : 0;
               challengeArr.push(
-                `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]] && "hide-backlog"} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}" onclick="showDetails('${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}', '${skill}', 'current')"><label class="checkbox noscroll ${!testMode && (viewOnly || inEntry || locked) ? "checkbox--disabled" : ""}"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]] ? "checked" : ""} class='noscroll' onclick="checkOffChallenge('${skill}', '${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}')" ${!testMode && (viewOnly || inEntry || locked) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${newBoost > 0 ? (chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost <= 0 ? 1 : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost) + "] (+" + newBoost + ")" : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] + "]"} <span class="inner noscroll">${skill}</b>: ${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[0])}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("|")[1])}" target="_blank">${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[1].split("|").join(""))}</a>${decodeQueryParam(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost].split("~")[2])}</span></span></label> <span class="burger noscroll${!testMode && (viewOnly || inEntry || locked) ? " hidden-burger" : ""}" onclick="openActiveContextMenu('${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}', '${skill}', ${hasAlts})"><i class="fa-solid fa-sliders-h noscroll">${hasAlts ? `<i class="fa-solid fa-star burger-star noscroll"></i>` : ""}</i></span></div>`,
+                `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]] && "hide-backlog"} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}" onclick="showDetails('${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}', '${skill}', 'current')"><label class="checkbox noscroll ${!testMode && (viewOnly || inEntry || locked) ? "checkbox--disabled" : ""}"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]] ? "checked" : ""} class='noscroll' onclick="checkOffChallenge('${skill}', '${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}')" ${!testMode && (viewOnly || inEntry || locked) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${newBoost > 0 ? (chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost <= 0 ? 1 : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] - newBoost) + "] (+" + newBoost + ")" : chunkInfo["challenges"][skill][altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost]]["Level"] + "]"} <span class="inner noscroll">${skill}</b>: ${displayedSkillTaskHtml}</span></span></label> <span class="burger noscroll${!testMode && (viewOnly || inEntry || locked) ? " hidden-burger" : ""}" onclick="openActiveContextMenu('${encodeRFC5987ValueChars(altChallenges[skill][chunkInfo["challenges"][skill][skillTask]["Level"] - boost])}', '${skill}', ${hasAlts})"><i class="fa-solid fa-sliders-h noscroll">${hasAlts ? `<i class="fa-solid fa-star burger-star noscroll"></i>` : ""}</i></span></div>`,
               );
               listOfTasks.push({
                 [altChallenges[skill][
@@ -11089,8 +11108,9 @@ let setupCurrentChallenges = function (tempChallengeArr, noDisplay, noClear) {
               }
               !renderedSkillTasks[skill] && (renderedSkillTasks[skill] = {});
               renderedSkillTasks[skill][skillTask] = true;
+              let skillTaskHtml = getSkillTaskDisplayHtml(skillTask);
               challengeArr.push(
-                `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, skillTask)} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] && "hide-backlog"} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}" onclick="showDetails('${encodeRFC5987ValueChars(skillTask)}', '${skill}', 'current')"><label class="checkbox noscroll ${!testMode && (viewOnly || inEntry || locked) ? "checkbox--disabled" : ""}"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "checked" : ""} class='noscroll' onclick="checkOffChallenge('${skill}', '${encodeRFC5987ValueChars(skillTask)}')" ${!testMode && (viewOnly || inEntry || locked) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${boost > 0 ? (chunkInfo["challenges"][skill][skillTask]["Level"] - boost <= 0 ? 1 : chunkInfo["challenges"][skill][skillTask]["Level"] - boost) + "] (+" + boost + ")" : chunkInfo["challenges"][skill][skillTask]["Level"] + "]"} <span class="inner noscroll">${skill}</b>: ${skillTask.split("~")[0]}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(skillTask.split("|")[1])}" target="_blank">${skillTask.split("~")[1].split("|").join("")}</a>${skillTask.split("~")[2]}</span></span></label> <span class="burger noscroll${!testMode && (viewOnly || inEntry || locked) ? " hidden-burger" : ""}" onclick="openActiveContextMenu('${encodeRFC5987ValueChars(skillTask)}', '${skill}', ${hasAlts})"><i class="fa-solid fa-sliders-h noscroll">${hasAlts ? `<i class="fa-solid fa-star burger-star noscroll"></i>` : ""}</i></span></div>`,
+                `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, skillTask)} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] && "hide-backlog"} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}" onclick="showDetails('${encodeRFC5987ValueChars(skillTask)}', '${skill}', 'current')"><label class="checkbox noscroll ${!testMode && (viewOnly || inEntry || locked) ? "checkbox--disabled" : ""}"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "checked" : ""} class='noscroll' onclick="checkOffChallenge('${skill}', '${encodeRFC5987ValueChars(skillTask)}')" ${!testMode && (viewOnly || inEntry || locked) ? "disabled" : ""}><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${boost > 0 ? (chunkInfo["challenges"][skill][skillTask]["Level"] - boost <= 0 ? 1 : chunkInfo["challenges"][skill][skillTask]["Level"] - boost) + "] (+" + boost + ")" : chunkInfo["challenges"][skill][skillTask]["Level"] + "]"} <span class="inner noscroll">${skill}</b>: ${skillTaskHtml}</span></span></label> <span class="burger noscroll${!testMode && (viewOnly || inEntry || locked) ? " hidden-burger" : ""}" onclick="openActiveContextMenu('${encodeRFC5987ValueChars(skillTask)}', '${skill}', ${hasAlts})"><i class="fa-solid fa-sliders-h noscroll">${hasAlts ? `<i class="fa-solid fa-star burger-star noscroll"></i>` : ""}</i></span></div>`,
               );
               listOfTasks.push({
                 [skillTask]: skill,
@@ -12161,8 +12181,9 @@ let setupCurrentChallengesFromSaved = function () {
             level = activeTasks[skill][skillTask];
             boost = 0;
           }
+          let skillTaskHtml = getSkillTaskDisplayHtml(skillTask);
           challengeArr.push(
-            `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, skillTask)} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "hide-backlog" : ""} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}"><label class="checkbox noscroll checkbox--disabled"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "checked" : ""} class='noscroll' disabled><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${boost > 0 ? (level - boost <= 0 ? 1 : level - boost) + "] (+" + boost + ")" : level + "]"} <span class="inner noscroll">${skill}</b>: ${decodeQueryParam(skillTask.split("~")[0])}<a class='link noscroll' href="${"https://runescape.wiki/w/" + encodeForUrl(skillTask.split("|")[1])}" target="_blank">${decodeQueryParam(skillTask.split("~")[1].split("|").join(""))}</a>${decodeQueryParam(skillTask.split("~")[2])}</span></span></label></div>`,
+            `<div class="challenge skill-challenge noscroll clickable ${skill + "-challenge"} ${getSkillChallengeClass(skill, skillTask)} ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "hide-backlog" : ""} ${!activeSubTabs["skill"] ? "stay-hidden" : ""}"><label class="checkbox noscroll checkbox--disabled"><span class="checkbox__input noscroll"><input type="checkbox" name="checkbox" ${!!checkedChallenges[skill] && !!checkedChallenges[skill][skillTask] ? "checked" : ""} class='noscroll' disabled><span class="checkbox__control noscroll"><svg viewBox='0 0 24 24' aria-hidden="true" focusable="false"><path fill='none' stroke='currentColor' stroke-width='3' d='M1.73 12.91l6.37 6.37L22.79 4.59' /></svg></span></span><span class="radio__label noscroll"><b class="noscroll">[${boost > 0 ? (level - boost <= 0 ? 1 : level - boost) + "] (+" + boost + ")" : level + "]"} <span class="inner noscroll">${skill}</b>: ${skillTaskHtml}</span></span></label></div>`,
           );
         });
     });
@@ -12944,7 +12965,7 @@ let calcFutureChallenges = function () {
   }
   tempSections = combineJSONs(tempSections, manualSections);
   myWorker2.terminate();
-  myWorker2 = new Worker("./worker.js?v=6.9.57");
+  myWorker2 = new Worker("./worker.js?v=6.9.64");
   myWorker2.onmessage = workerOnMessage;
   myWorker2.postMessage({
     type: "future",

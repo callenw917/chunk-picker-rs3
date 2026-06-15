@@ -194,6 +194,7 @@ let altAmmoGlobal = {};
 let manualSections = {};
 let unlockedSections = {};
 let maxSkill;
+let effectiveMaxSkill = null;
 let userTasks = {};
 let manualPrimary = {};
 let updateLevel;
@@ -340,17 +341,24 @@ onmessage = function(e) {
             chunks = {};
         }
 
-        dropRatesGlobal = {};
-        dropTablesGlobal = {};
+        effectiveMaxSkill = null;
+        resetCalculationScratch();
         bringAlongTasks = {};
 
         chunks = getAllChunkAreas(chunks);
         baseChunkData = gatherChunksInfo(chunks);
+        let originalBaseChunkData = freeze(baseChunkData);
         type === 'current' && postMessage({ type: 'loading-update', percentage: '5%' });
         globalValids = calcChallenges(chunks, baseChunkData);
         baseChunkData = tempChunkData;
         if (type === 'current' && rules["Progressive Skill Caps"]) {
-            console.log('progressiveSkillCaps v6.9.57', calculateProgressiveSkillCaps(globalValids));
+            let progressiveSkillCaps = calculateProgressiveSkillCaps(globalValids);
+            console.log('progressiveSkillCaps v6.9.64', progressiveSkillCaps);
+            effectiveMaxSkill = buildEffectiveMaxSkill(progressiveSkillCaps);
+            resetCalculationScratch();
+            baseChunkData = freeze(originalBaseChunkData);
+            globalValids = calcChallenges(chunks, baseChunkData);
+            baseChunkData = tempChunkData;
         }
         type === 'current' && postMessage({ type: 'loading-update', percentage: '95%' });
         highestOverall = calcBIS();
@@ -528,6 +536,47 @@ let getLevelForXp = function(xp) {
         level++;
     }
     return level;
+}
+
+let hasEffectiveMaxSkill = function(skill) {
+    return (!!effectiveMaxSkill && effectiveMaxSkill.hasOwnProperty(skill)) || (!!maxSkill && maxSkill.hasOwnProperty(skill));
+}
+
+let getEffectiveMaxSkill = function(skill) {
+    if (!!effectiveMaxSkill && effectiveMaxSkill.hasOwnProperty(skill)) {
+        return effectiveMaxSkill[skill];
+    }
+    if (!!maxSkill && maxSkill.hasOwnProperty(skill)) {
+        return maxSkill[skill];
+    }
+    return null;
+}
+
+let isAboveEffectiveMaxSkill = function(skill, level) {
+    let skillCap = getEffectiveMaxSkill(skill);
+    return skillCap !== null && level > skillCap;
+}
+
+let buildEffectiveMaxSkill = function(progressiveSkillCaps) {
+    let tempMaxSkill = !!maxSkill ? {...maxSkill} : {};
+    !!progressiveSkillCaps && Object.keys(progressiveSkillCaps).forEach((skill) => {
+        let capInfo = progressiveSkillCaps[skill];
+        if (!!capInfo && !isNaN(parseInt(capInfo['cap']))) {
+            let cap = parseInt(capInfo['cap']);
+            if (!tempMaxSkill.hasOwnProperty(skill) || cap < tempMaxSkill[skill]) {
+                tempMaxSkill[skill] = cap;
+            }
+        }
+    });
+    return tempMaxSkill;
+}
+
+let resetCalculationScratch = function() {
+    nonValids = {};
+    dropRatesGlobal = {};
+    dropTablesGlobal = {};
+    tempChunkData = {};
+    bringAlongTasks = {};
 }
 
 // Marks subTasks with the same BaseQuest with val
@@ -1033,7 +1082,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                             }
                         });
                     } else if (!chunkInfo['drops'].hasOwnProperty(monster) && chunkInfo['skillItems']['Slayer'].hasOwnProperty(monster)) {
-                        let isSlayerValid = !chunkInfo['slayerMonsters'].hasOwnProperty(monster) || (checkPrimaryMethod('Slayer', newValids, baseChunkData) && (!slayerLocked || chunkInfo['slayerMonsters'][monster] <= slayerLocked['level']) && (!maxSkill || !maxSkill.hasOwnProperty('Slayer') || chunkInfo['slayerMonsters'][monster] <= maxSkill['Slayer'])) || (passiveSkill && passiveSkill.hasOwnProperty('Slayer') && chunkInfo['slayerMonsters'][monster] <= passiveSkill['Slayer']);
+                        let isSlayerValid = !chunkInfo['slayerMonsters'].hasOwnProperty(monster) || (checkPrimaryMethod('Slayer', newValids, baseChunkData) && (!slayerLocked || chunkInfo['slayerMonsters'][monster] <= slayerLocked['level']) && !isAboveEffectiveMaxSkill('Slayer', chunkInfo['slayerMonsters'][monster])) || (passiveSkill && passiveSkill.hasOwnProperty('Slayer') && chunkInfo['slayerMonsters'][monster] <= passiveSkill['Slayer']);
                         if (isSlayerValid) {
                             let slayerTasks = Object.keys(chunkInfo['challenges']['Slayer']).filter((name) => chunkInfo['challenges']['Slayer'][name]['Output'] === monster);
                             if (slayerTasks.length > 0 && (!newValids['Slayer'] || !newValids['Slayer'].hasOwnProperty(slayerTasks[0]))) {
@@ -1358,7 +1407,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                                     highestCompletedLevel = chunkInfo['challenges'][subSkill][task]['Level'];
                                 }
                             });
-                            if ((!checkPrimaryMethod(subSkill, newValids, baseChunkData) && ((subSkill !== 'Slayer' || !slayerLocked || (chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > slayerLocked['level'])) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] <= 1 || (chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > passiveSkill[subSkill]) && (highestCompletedLevel <= 1 || highestCompletedLevel <= chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > 1) || (subSkill === 'Slayer' && !!slayerLocked && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > maxSkill[subSkill]) || ((chunkInfo['challenges'][skill][challenge]['Level'] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > highestSkillLevels[skill] && !chunkInfo['challenges'][skill][challenge]['Allow Virtual'])) {
+                            if ((!checkPrimaryMethod(subSkill, newValids, baseChunkData) && ((subSkill !== 'Slayer' || !slayerLocked || (chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > slayerLocked['level'])) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] <= 1 || (chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > passiveSkill[subSkill]) && (highestCompletedLevel <= 1 || highestCompletedLevel <= chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > 1) || (subSkill === 'Slayer' && !!slayerLocked && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) || ((chunkInfo['challenges'][skill][challenge]['Level'] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > highestSkillLevels[skill] && !chunkInfo['challenges'][skill][challenge]['Allow Virtual'])) {
                                 if (!nonValids.hasOwnProperty(challenge)) {
                                     nonValids[challenge] = [];
                                 }
@@ -1535,7 +1584,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                                     highestLevel = chunkInfo['challenges'][req][task]['Level'];
                                 }
                             });
-                            return (!checkPrimaryMethod(req, newValids, baseChunkData) && !chunkInfo['challenges'][skill][challenge]['ManualValid'] && (!passiveSkill || !passiveSkill.hasOwnProperty(req) || passiveSkill[req] <= 1 || passiveSkill[req] < chunkInfo['challenges'][skill][challenge]['Requirements'][req]) && (highestLevel <= 1 || highestLevel < chunkInfo['challenges'][skill][challenge]['Requirements'][req])) || (!!maxSkill && maxSkill.hasOwnProperty(req) && chunkInfo['challenges'][skill][challenge]['Requirements'][req] > maxSkill[req]);
+                            return (!checkPrimaryMethod(req, newValids, baseChunkData) && !chunkInfo['challenges'][skill][challenge]['ManualValid'] && (!passiveSkill || !passiveSkill.hasOwnProperty(req) || passiveSkill[req] <= 1 || passiveSkill[req] < chunkInfo['challenges'][skill][challenge]['Requirements'][req]) && (highestLevel <= 1 || highestLevel < chunkInfo['challenges'][skill][challenge]['Requirements'][req])) || isAboveEffectiveMaxSkill(req, chunkInfo['challenges'][skill][challenge]['Requirements'][req]);
                         }).some((req) => {
                             if (!nonValids.hasOwnProperty(challenge)) {
                                 nonValids[challenge] = [];
@@ -1768,7 +1817,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                             highestLevel = chunkInfo['challenges'][req][task]['Level'];
                         }
                     });
-                    return (!checkPrimaryMethod(req, newValids, baseChunkData) && !chunkInfo['challenges'][skill][challenge]['ManualValid'] && (!passiveSkill || !passiveSkill.hasOwnProperty(req) || passiveSkill[req] <= 1 || passiveSkill[req] < chunkInfo['challenges'][req][chunkInfo['challenges'][skill][challenge]['Requirements'][req]]) && (highestLevel <= 1 || highestLevel < chunkInfo['challenges'][req][chunkInfo['challenges'][skill][challenge]['Requirements'][req]])) || (!!maxSkill && maxSkill.hasOwnProperty(req) && chunkInfo['challenges'][skill][challenge]['Requirements'][req] > maxSkill[req]);
+                    return (!checkPrimaryMethod(req, newValids, baseChunkData) && !chunkInfo['challenges'][skill][challenge]['ManualValid'] && (!passiveSkill || !passiveSkill.hasOwnProperty(req) || passiveSkill[req] <= 1 || passiveSkill[req] < chunkInfo['challenges'][req][chunkInfo['challenges'][skill][challenge]['Requirements'][req]]) && (highestLevel <= 1 || highestLevel < chunkInfo['challenges'][req][chunkInfo['challenges'][skill][challenge]['Requirements'][req]])) || isAboveEffectiveMaxSkill(req, chunkInfo['challenges'][skill][challenge]['Requirements'][req]);
                 }).some(req => {
                     if (!nonValids.hasOwnProperty(challenge)) {
                         nonValids[challenge] = [];
@@ -2003,7 +2052,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                         });
                     }
                     if (challenge.hasOwnProperty('Skills')) {
-                        let subSkillValid = !(Object.keys(challenge['Skills']).filter((subSkill) => { return !checkPrimaryMethod(subSkill, newValids, baseChunkData) && (subSkill !== 'Slayer' || !slayerLocked || challenge['Skills'][subSkill] > slayerLocked['level']) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] <= 1 || challenge['Skills'][subSkill] > passiveSkill[subSkill]) && (!maxSkill || !maxSkill.hasOwnProperty(subSkill) || challenge['Skills'][subSkill] > maxSkill[subSkill]) }).length > 0);
+                        let subSkillValid = !(Object.keys(challenge['Skills']).filter((subSkill) => { return !checkPrimaryMethod(subSkill, newValids, baseChunkData) && (subSkill !== 'Slayer' || !slayerLocked || challenge['Skills'][subSkill] > slayerLocked['level']) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] <= 1 || challenge['Skills'][subSkill] > passiveSkill[subSkill]) && (!hasEffectiveMaxSkill(subSkill) || isAboveEffectiveMaxSkill(subSkill, challenge['Skills'][subSkill])) }).length > 0);
                         if (!subSkillValid) {
                             !!newValids[skill] && delete newValids[skill][name];
                             !!valids[skill] && delete valids[skill][name];
@@ -2092,7 +2141,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                         });
                     }
                     if (challenge.hasOwnProperty('Skills')) {
-                        let subSkillValid = !(Object.keys(challenge['Skills']).filter((subSkill) => { return (!checkPrimaryMethod(subSkill, newValids, baseChunkData) || (subSkill === 'Slayer' && !!slayerLocked && challenge['Skills'][subSkill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && challenge['Skills'][subSkill] > maxSkill[subSkill])) && challenge['Skills'][subSkill] > 1 }).length > 0);
+                        let subSkillValid = !(Object.keys(challenge['Skills']).filter((subSkill) => { return (!checkPrimaryMethod(subSkill, newValids, baseChunkData) || (subSkill === 'Slayer' && !!slayerLocked && challenge['Skills'][subSkill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(subSkill, challenge['Skills'][subSkill])) && challenge['Skills'][subSkill] > 1 }).length > 0);
                         if (!subSkillValid) {
                             !!newValids[skill] && delete newValids[skill][name];
                             !!valids[skill] && delete valids[skill][name];
@@ -2256,7 +2305,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                             highestCompletedLevel = chunkInfo['challenges'][subSkill][task]['Level'];
                         }
                     });
-                    if ((!checkPrimaryMethod(subSkill, newValids, baseChunkData) && ((subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][name]['Skills'][subSkill] > slayerLocked['level'])) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] <= 1 || chunkInfo['challenges'][skill][name]['Skills'][subSkill] > passiveSkill[subSkill]) && (highestCompletedLevel <= 1 || highestCompletedLevel <= chunkInfo['challenges'][skill][name]['Skills'][subSkill])) || (subSkill === 'Slayer' && !!slayerLocked && chunkInfo['challenges'][skill][name]['Skills'][subSkill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][name]['Skills'][subSkill] > maxSkill[subSkill])) {
+                    if ((!checkPrimaryMethod(subSkill, newValids, baseChunkData) && ((subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][name]['Skills'][subSkill] > slayerLocked['level'])) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] <= 1 || chunkInfo['challenges'][skill][name]['Skills'][subSkill] > passiveSkill[subSkill]) && (highestCompletedLevel <= 1 || highestCompletedLevel <= chunkInfo['challenges'][skill][name]['Skills'][subSkill])) || (subSkill === 'Slayer' && !!slayerLocked && chunkInfo['challenges'][skill][name]['Skills'][subSkill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][name]['Skills'][subSkill])) {
                         stillValid = false;
                         return true;
                     }
@@ -2292,7 +2341,7 @@ let calcChallenges = function(chunks, baseChunkData) {
             if (chunkInfo['challenges']['Nonskill'][task].hasOwnProperty('SkillsNeeded')) {
                 let tempValidNeeded = true;
                 Object.keys(chunkInfo['challenges']['Nonskill'][task]['SkillsNeeded']).some(taskSkill => {
-                    if ((!checkPrimaryMethod(taskSkill, newValids, baseChunkData) || (taskSkill === 'Slayer' && (!!slayerLocked && chunkInfo['challenges']['Nonskill'][task]['SkillsNeeded'][taskSkill] > slayerLocked['level'])) || (!!maxSkill && maxSkill.hasOwnProperty(taskSkill) && chunkInfo['challenges']['Nonskill'][task]['SkillsNeeded'][taskSkill] > maxSkill[taskSkill])) && !(!!passiveSkill && passiveSkill.hasOwnProperty(taskSkill) && passiveSkill[taskSkill] > 1 && chunkInfo['challenges']['Nonskill'][task]['SkillsNeeded'][taskSkill] <= passiveSkill[taskSkill])) {
+                    if ((!checkPrimaryMethod(taskSkill, newValids, baseChunkData) || (taskSkill === 'Slayer' && (!!slayerLocked && chunkInfo['challenges']['Nonskill'][task]['SkillsNeeded'][taskSkill] > slayerLocked['level'])) || isAboveEffectiveMaxSkill(taskSkill, chunkInfo['challenges']['Nonskill'][task]['SkillsNeeded'][taskSkill])) && !(!!passiveSkill && passiveSkill.hasOwnProperty(taskSkill) && passiveSkill[taskSkill] > 1 && chunkInfo['challenges']['Nonskill'][task]['SkillsNeeded'][taskSkill] <= passiveSkill[taskSkill])) {
                         tempValidNeeded = false;
                         return true;
                     }
@@ -2720,7 +2769,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                                 }
                             });
                         } else if (!chunkInfo['drops'].hasOwnProperty(monster) && chunkInfo['skillItems']['Slayer'].hasOwnProperty(monster)) {
-                            let isSlayerValid = !chunkInfo['slayerMonsters'].hasOwnProperty(monster) || (checkPrimaryMethod('Slayer', newValids, baseChunkData) && (!slayerLocked || chunkInfo['slayerMonsters'][monster] <= slayerLocked['level']) && (!maxSkill || !maxSkill.hasOwnProperty('Slayer') || chunkInfo['slayerMonsters'][monster] <= maxSkill['Slayer'])) || (passiveSkill && passiveSkill.hasOwnProperty('Slayer') && chunkInfo['slayerMonsters'][monster] <= passiveSkill['Slayer']);
+                            let isSlayerValid = !chunkInfo['slayerMonsters'].hasOwnProperty(monster) || (checkPrimaryMethod('Slayer', newValids, baseChunkData) && (!slayerLocked || chunkInfo['slayerMonsters'][monster] <= slayerLocked['level']) && !isAboveEffectiveMaxSkill('Slayer', chunkInfo['slayerMonsters'][monster])) || (passiveSkill && passiveSkill.hasOwnProperty('Slayer') && chunkInfo['slayerMonsters'][monster] <= passiveSkill['Slayer']);
                             if (isSlayerValid) {
                                 let slayerTasks = Object.keys(chunkInfo['challenges']['Slayer']).filter((name) => chunkInfo['challenges']['Slayer'][name]['Output'] === monster);
                                 if (slayerTasks.length > 0 && (!newValids['Slayer'] || !newValids['Slayer'].hasOwnProperty(slayerTasks[0]))) {
@@ -2971,7 +3020,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                 if (chunkInfo['challenges'][skill][challenge].hasOwnProperty('SkillsNeeded')) {
                     let skillsNeededInvalid = false;
                     Object.keys(chunkInfo['challenges'][skill][challenge]['SkillsNeeded']).some(taskSkill => {
-                        if ((!checkPrimaryMethod(taskSkill, newValids, baseChunkData) || (taskSkill === 'Slayer' && (!!slayerLocked && chunkInfo['challenges'][skill][challenge]['SkillsNeeded'][taskSkill] > slayerLocked['level'])) || (!!maxSkill && maxSkill.hasOwnProperty(taskSkill) && chunkInfo['challenges'][skill][challenge]['SkillsNeeded'][taskSkill] > maxSkill[taskSkill])) && !(!!passiveSkill && passiveSkill.hasOwnProperty(taskSkill) && passiveSkill[taskSkill] > 1 && chunkInfo['challenges'][skill][challenge]['SkillsNeeded'][taskSkill] <= passiveSkill[taskSkill])) {
+                        if ((!checkPrimaryMethod(taskSkill, newValids, baseChunkData) || (taskSkill === 'Slayer' && (!!slayerLocked && chunkInfo['challenges'][skill][challenge]['SkillsNeeded'][taskSkill] > slayerLocked['level'])) || isAboveEffectiveMaxSkill(taskSkill, chunkInfo['challenges'][skill][challenge]['SkillsNeeded'][taskSkill])) && !(!!passiveSkill && passiveSkill.hasOwnProperty(taskSkill) && passiveSkill[taskSkill] > 1 && chunkInfo['challenges'][skill][challenge]['SkillsNeeded'][taskSkill] <= passiveSkill[taskSkill])) {
                             skillsNeededInvalid = true;
                             return true;
                         }
@@ -2981,7 +3030,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                         nonValids[challenge] = ['SkillsNeeded'];
                     }
                 }
-                let subSkillValid = !(chunkInfo['challenges'][skill][challenge].hasOwnProperty('Skills') && Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter((subSkill) => { return !checkPrimaryMethod(subSkill, tempChallenges, baseChunkData) || (subSkill === 'Slayer' && !!slayerLocked && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > maxSkill[subSkill]) }).length > 0);
+                let subSkillValid = !(chunkInfo['challenges'][skill][challenge].hasOwnProperty('Skills') && Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter((subSkill) => { return !checkPrimaryMethod(subSkill, tempChallenges, baseChunkData) || (subSkill === 'Slayer' && !!slayerLocked && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) }).length > 0);
                 if (subSkillValid && skill !== 'BiS') {
                     if (!!chunkInfo['challenges'][skill][challenge]['Output'] && ((!backlog[skill] || (!backlog[skill].hasOwnProperty(challenge) && !backlog[skill].hasOwnProperty(challenge.replaceAll('#', '/')))))) {
                         let output = chunkInfo['challenges'][skill][challenge]['Output'];
@@ -3381,7 +3430,7 @@ let calcChallenges = function(chunks, baseChunkData) {
                                 }
                             });
                         } else if (!chunkInfo['drops'].hasOwnProperty(monster) && chunkInfo['skillItems']['Slayer'].hasOwnProperty(monster)) {
-                            let isSlayerValid = !chunkInfo['slayerMonsters'].hasOwnProperty(monster) || (checkPrimaryMethod('Slayer', newValids, baseChunkData) && (!slayerLocked || chunkInfo['slayerMonsters'][monster] <= slayerLocked['level']) && (!maxSkill || !maxSkill.hasOwnProperty('Slayer') || chunkInfo['slayerMonsters'][monster] <= maxSkill['Slayer'])) || (passiveSkill && passiveSkill.hasOwnProperty('Slayer') && chunkInfo['slayerMonsters'][monster] <= passiveSkill['Slayer']);
+                            let isSlayerValid = !chunkInfo['slayerMonsters'].hasOwnProperty(monster) || (checkPrimaryMethod('Slayer', newValids, baseChunkData) && (!slayerLocked || chunkInfo['slayerMonsters'][monster] <= slayerLocked['level']) && !isAboveEffectiveMaxSkill('Slayer', chunkInfo['slayerMonsters'][monster])) || (passiveSkill && passiveSkill.hasOwnProperty('Slayer') && chunkInfo['slayerMonsters'][monster] <= passiveSkill['Slayer']);
                             if (isSlayerValid) {
                                 let slayerTasks = Object.keys(chunkInfo['challenges']['Slayer']).filter((name) => chunkInfo['challenges']['Slayer'][name]['Output'] === monster);
                                 if (slayerTasks.length > 0 && (!newValids['Slayer'] || !newValids['Slayer'].hasOwnProperty(slayerTasks[0]))) {
@@ -3889,7 +3938,7 @@ let calcChallengesWork = function(chunks, baseChunkData, oldTempItemSkill) {
             }
 
             delete chunkInfo['challenges'][skill][name]['NeverShow'];
-            if (!!maxSkill && maxSkill.hasOwnProperty(skill) && chunkInfo['challenges'][skill][name].hasOwnProperty('Level') && maxSkill[skill] < chunkInfo['challenges'][skill][name]['Level']) {
+            if (chunkInfo['challenges'][skill][name].hasOwnProperty('Level') && isAboveEffectiveMaxSkill(skill, chunkInfo['challenges'][skill][name]['Level'])) {
                 validChallenge = false;
                 wrongThings.push('Max Skill');
                 nonValids[name] = wrongThings;
@@ -5564,7 +5613,7 @@ let calcBIS = function(completedOnly) {
                 return;
             }
             let validWearable = true;
-            !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0 && (validWearable = false);
+            !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0 && (validWearable = false);
             !!chunkInfo['taskUnlocks'] && chunkInfo['taskUnlocks']['Items'].hasOwnProperty(equip) && chunkInfo['taskUnlocks']['Items'][equip].filter(task => !globalValids || !globalValids[Object.values(task)[0]] || !globalValids[Object.values(task)[0]].hasOwnProperty(Object.keys(task)[0])).length > 0 && (validWearable = false);
             if ((!chunkInfo['equipment'][equip].hasOwnProperty('accuracy') || chunkInfo['equipment'][equip].accuracy === 0) &&
             (!chunkInfo['equipment'][equip].hasOwnProperty('ability_damage') || chunkInfo['equipment'][equip].ability_damage === 0) &&
@@ -6630,7 +6679,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -6685,7 +6734,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -6740,7 +6789,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -6814,7 +6863,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -6888,7 +6937,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -6968,7 +7017,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7020,7 +7069,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7072,7 +7121,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7146,7 +7195,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7220,7 +7269,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7300,7 +7349,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7352,7 +7401,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7404,7 +7453,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7478,7 +7527,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7552,7 +7601,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7632,7 +7681,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7684,7 +7733,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7736,7 +7785,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7810,7 +7859,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7884,7 +7933,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -7964,7 +8013,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8016,7 +8065,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8068,7 +8117,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8142,7 +8191,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8216,7 +8265,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8296,7 +8345,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8348,7 +8397,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8400,7 +8449,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8474,7 +8523,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8548,7 +8597,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8628,7 +8677,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8702,7 +8751,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8776,7 +8825,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8856,7 +8905,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -8930,7 +8979,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -9010,7 +9059,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -9084,7 +9133,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -9164,7 +9213,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -9238,7 +9287,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -9318,7 +9367,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -9392,7 +9441,7 @@ let calcBIS = function(completedOnly) {
                     validWearable = false;
                     return true;
                 }
-                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(skill) && maxSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
+                if (baseChunkData['items'].hasOwnProperty(equip) && !!chunkInfo['equipment'][equip].requirements && Object.keys(chunkInfo['equipment'][equip].requirements).filter(skill => (rules['Skiller'] && chunkInfo['equipment'][equip].requirements[skill] > 1) || (!primarySkill[skill] && chunkInfo['equipment'][equip].requirements[skill] > 1 && (!passiveSkill || !passiveSkill.hasOwnProperty(skill) || passiveSkill[skill] < chunkInfo['equipment'][equip].requirements[skill])) || (skill === 'Slayer' && !!slayerLocked && chunkInfo['equipment'][equip].requirements[skill] > slayerLocked['level']) || isAboveEffectiveMaxSkill(skill, chunkInfo['equipment'][equip].requirements[skill])).length > 0) {
                     validWearable = false;
                     return true;
                 }
@@ -9755,7 +9804,27 @@ let isProgressiveCapAnchor = function(valids, skill, task) {
         challenge['Primary'] &&
         (!challenge['Secondary'] || allowsSecondaryStarter) &&
         !challenge['NeverShow'] &&
-        !isTaskBacklogged(skill, task);
+        !isTaskBacklogged(skill, task) &&
+        hasDirectProgressiveAnchorObject(challenge);
+};
+
+let objectHasDirectProgressiveAnchorSource = function(object) {
+    return !!baseChunkData &&
+        !!baseChunkData['objects'] &&
+        !!baseChunkData['objects'][object] &&
+        Object.values(baseChunkData['objects'][object]).some((source) => source === true);
+};
+
+let hasDirectProgressiveAnchorObject = function(challenge) {
+    if (!challenge || !challenge['Objects']) {
+        return true;
+    }
+    return challenge['Objects'].filter((object) => {
+        if (object.includes('[+]') && objectsPlus.hasOwnProperty(object)) {
+            return objectsPlus[object].some((plus) => objectHasDirectProgressiveAnchorSource(plus));
+        }
+        return objectHasDirectProgressiveAnchorSource(object);
+    }).length === challenge['Objects'].length;
 };
 
 let shouldReplaceProgressiveCapAnchor = function(capInfo, targetCap, anchorLevel, task) {
@@ -9849,7 +9918,84 @@ let calcCurrentChallenges2 = function() {
         if (!chunkInfo['challenges'][skill][challenge]['Skills']) {
             return true;
         }
-        return Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > maxSkill[subSkill])).length === 0;
+        return Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill])).length === 0;
+    };
+
+    let skillTaskIsRenderable = function(skill, challenge) {
+        return !!challenge &&
+            !!globalValids[skill] &&
+            globalValids[skill].hasOwnProperty(challenge) &&
+            globalValids[skill][challenge] !== false &&
+            !!chunkInfo['challenges'][skill] &&
+            !!chunkInfo['challenges'][skill][challenge] &&
+            !chunkInfo['challenges'][skill][challenge]['NeverShow'] &&
+            (!completedChallenges[skill] || (!completedChallenges[skill].hasOwnProperty(challenge) && !completedChallenges[skill][challenge.replaceAll('#', '/')])) &&
+            (!backlog[skill] || (!backlog[skill].hasOwnProperty(challenge) && !backlog[skill].hasOwnProperty(challenge.replaceAll('#', '/')))) &&
+            skillTaskPassesSubSkillRequirements(skill, challenge);
+    };
+
+    let preferSkillTask = function(skill, candidate, current) {
+        if (!current) {
+            return true;
+        }
+        if (realLevel[skill][candidate] > realLevel[skill][current]) {
+            return true;
+        }
+        return realLevel[skill][candidate] === realLevel[skill][current] &&
+            (!chunkInfo['challenges'][skill][current]['Priority'] || (!!chunkInfo['challenges'][skill][candidate]['Priority'] && chunkInfo['challenges'][skill][candidate]['Priority'] < chunkInfo['challenges'][skill][current]['Priority']));
+    };
+
+    let skillTaskPassesCurrentDisplayGate = function(skill, challenge) {
+        if (!skillTaskIsRenderable(skill, challenge)) {
+            return false;
+        }
+        if (!realLevel[skill]) {
+            realLevel[skill] = [];
+        }
+        if (!realLevel[skill].hasOwnProperty(challenge)) {
+            realLevel[skill][challenge] = getEffectiveSkillTaskLevel(skill, challenge);
+        }
+        if (realLevel[skill][challenge] === null) {
+            return false;
+        }
+        return checkPrimaryMethod(skill, globalValids, baseChunkData) ||
+            realLevel[skill][challenge] === 1 ||
+            (!!passiveSkill && !!passiveSkill.hasOwnProperty(skill) && passiveSkill[skill] >= realLevel[skill][challenge]) ||
+            (manualTasks.hasOwnProperty(skill) && manualTasks[skill].hasOwnProperty(challenge)) ||
+            (userTasks.hasOwnProperty(skill) && userTasks[skill].hasOwnProperty(challenge));
+    };
+
+    let rebuildCurrentSkillTaskPayload = function(tempChallengeArr) {
+        allSkillTaskArr = {};
+        Object.keys(globalValids).filter(skill => skillNames.includes(skill) && skill !== 'Combat').forEach((skill) => {
+            let highestChallenge;
+            if (!realLevel[skill]) {
+                realLevel[skill] = [];
+            }
+            Object.keys(globalValids[skill]).forEach((challenge) => {
+                if (!skillTaskPassesCurrentDisplayGate(skill, challenge)) {
+                    return;
+                }
+                addAllSkillTask(skill, challenge);
+                if (preferSkillTask(skill, challenge, highestChallenge)) {
+                    highestChallenge = challenge;
+                }
+            });
+            if (!!allSkillTaskArr[skill]) {
+                allSkillTaskArr[skill].sort((taskA, taskB) => {
+                    let levelDiff = realLevel[skill][taskA] - realLevel[skill][taskB];
+                    return levelDiff !== 0 ? levelDiff : taskA.localeCompare(taskB, 'en', { numeric: true });
+                });
+            }
+            if (!!highestChallenge) {
+                tempChallengeArr[skill] = highestChallenge;
+                highestCurrent[skill] = highestChallenge;
+                highestOverall[skill] = highestChallenge;
+            } else {
+                delete tempChallengeArr[skill];
+                delete highestCurrent[skill];
+            }
+        });
     };
 
     Object.keys(globalValids).forEach((skill) => {
@@ -9918,7 +10064,7 @@ let calcCurrentChallenges2 = function() {
                             if ((!backlog[skill] || (!backlog[skill].hasOwnProperty(challenge) && !backlog[skill].hasOwnProperty(challenge.replaceAll('#', '/'))))) {
                                 if (!!chunkInfo['challenges'][skill][challenge]['Skills']) {
                                     let tempValid = true;
-                                    Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > maxSkill[subSkill])).length > 0 && (tempValid = false);
+                                    Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill])).length > 0 && (tempValid = false);
                                     if (tempValid) {
                                         highestChallenge[skill] = challenge;
                                     }
@@ -9929,7 +10075,7 @@ let calcCurrentChallenges2 = function() {
                                 Object.keys(tempAlwaysGlobal[skill][challenge]).filter(tempChallenge => !backlog[skill] || (!backlog[skill].hasOwnProperty(tempChallenge) && !backlog[skill].hasOwnProperty(tempChallenge.replaceAll('#', '/')))).sort((a, b) => { return a['Level'] - b['Level'] }).forEach((tempChallenge) => {
                                     if (!!chunkInfo['challenges'][skill][tempChallenge]['Skills']) {
                                         let tempValid = true;
-                                        Object.keys(chunkInfo['challenges'][skill][tempChallenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][tempChallenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > maxSkill[subSkill])).length > 0 && (tempValid = false);
+                                        Object.keys(chunkInfo['challenges'][skill][tempChallenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][tempChallenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill])).length > 0 && (tempValid = false);
                                         if (tempValid) {
                                             highestChallenge[skill] = tempChallenge;
                                         }
@@ -9942,7 +10088,7 @@ let calcCurrentChallenges2 = function() {
                             if ((!backlog[skill] || (!backlog[skill].hasOwnProperty(challenge) && !backlog[skill].hasOwnProperty(challenge.replaceAll('#', '/'))))) {
                                 if (!!chunkInfo['challenges'][skill][challenge]['Skills']) {
                                     let tempValid = true;
-                                    Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > maxSkill[subSkill])).length > 0 && (tempValid = false);
+                                    Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill])).length > 0 && (tempValid = false);
                                     if (tempValid) {
                                         highestChallenge[skill] = challenge;
                                     }
@@ -9953,7 +10099,7 @@ let calcCurrentChallenges2 = function() {
 								Object.keys(tempAlwaysGlobal[skill][challenge]).filter(tempChallenge => !backlog[skill] || (!backlog[skill].hasOwnProperty(tempChallenge) && !backlog[skill].hasOwnProperty(tempChallenge.replaceAll('#', '/')))).sort((a, b) => { return a['Level'] - b['Level'] }).forEach((tempChallenge) => {
 									if (!!chunkInfo['challenges'][skill][tempChallenge]['Skills']) {
 										let tempValid = true;
-										Object.keys(chunkInfo['challenges'][skill][tempChallenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][tempChallenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > maxSkill[subSkill])).length > 0 && (tempValid = false);
+										Object.keys(chunkInfo['challenges'][skill][tempChallenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][tempChallenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill])).length > 0 && (tempValid = false);
 										if (tempValid) {
 											highestChallenge[skill] = tempChallenge;
 										}
@@ -10020,7 +10166,7 @@ let calcCurrentChallenges2 = function() {
                             }
                         });
                     }
-                    if ((!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < (chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))))) || (subSkill === 'Slayer' && !!slayerLocked && (chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > slayerLocked['level']) || (!!maxSkill && maxSkill.hasOwnProperty(subSkill) && chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > maxSkill[subSkill]) || ((chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > highestSkillLevels[subSkill] && !chunkInfo['challenges'][skill][challenge]['Allow Virtual'])) {
+                    if ((!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < (chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))))) || (subSkill === 'Slayer' && !!slayerLocked && (chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > slayerLocked['level']) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) || ((chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] - (bestBoost + (ownsCrystalSaw ? 3 : 0))) > highestSkillLevels[subSkill] && !chunkInfo['challenges'][skill][challenge]['Allow Virtual'])) {
                         tempValid = false;
                         return true;
                     }
@@ -10188,6 +10334,7 @@ let calcCurrentChallenges2 = function() {
             }
         });
     });
+    rebuildCurrentSkillTaskPayload(tempChallengeArr);
     !!manualTasks && Object.keys(manualTasks).filter((skill) => chunkInfo['challenges'].hasOwnProperty(skill)).forEach((skill) => {
         Object.keys(manualTasks[skill]).filter((challenge) => chunkInfo['challenges'][skill].hasOwnProperty(challenge) && chunkInfo['challenges'][skill][challenge].hasOwnProperty('ManualValid')).forEach((challenge) => {
             delete chunkInfo['challenges'][skill][challenge]['ManualValid'];
