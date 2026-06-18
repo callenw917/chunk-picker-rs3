@@ -1685,6 +1685,7 @@ let manualMonsters = {};
 let slayerLocked = null;
 let passiveSkill = {};
 let maxSkill = {};
+let currentPlayerSkillLevels = {};
 let detailsModalOpen = false;
 let notesModalOpen = false;
 let notesChallenge = null;
@@ -6278,7 +6279,7 @@ let calcCurrentChallengesCanvas = function (
       true,
     );
     myWorker.terminate();
-    myWorker = new Worker("./worker.js?v=6.9.64");
+    myWorker = new Worker("./worker.js?v=6.9.81");
     myWorker.onmessage = workerOnMessage;
     myWorker.postMessage({
       type: "current",
@@ -6329,6 +6330,7 @@ let calcCurrentChallengesCanvas = function (
       isOnlyManualAreas: mid === manualAreasOnly,
       manualSections: tempSections,
       maxSkill,
+      currentPlayerSkillLevels,
       userTasks,
       manualPrimary,
       updateLevel,
@@ -6770,8 +6772,8 @@ $(document).ready(function () {
 // ------------------------------------------------------------
 
 // Recieve message from worker
-let myWorker = new Worker("./worker.js?v=6.9.64");
-let myWorker2 = new Worker("./worker.js?v=6.9.64");
+let myWorker = new Worker("./worker.js?v=6.9.81");
+let myWorker2 = new Worker("./worker.js?v=6.9.81");
 let workerOnMessage = function (e) {
   if (e.data.type === "reload") {
     window.location.reload();
@@ -13045,7 +13047,7 @@ let calcFutureChallenges = function () {
   }
   tempSections = combineJSONs(tempSections, manualSections);
   myWorker2.terminate();
-  myWorker2 = new Worker("./worker.js?v=6.9.64");
+  myWorker2 = new Worker("./worker.js?v=6.9.81");
   myWorker2.onmessage = workerOnMessage;
   myWorker2.postMessage({
     type: "future",
@@ -17853,6 +17855,11 @@ let openPassiveModal = function (skill) {
       ? passiveSkill[skill]
       : 1,
   );
+  $("#current-player-skill-input").val(
+    !!currentPlayerSkillLevels && currentPlayerSkillLevels.hasOwnProperty(skill)
+      ? currentPlayerSkillLevels[skill]
+      : "",
+  );
   $("#max-skill-input").val(
     !!maxSkill && maxSkill.hasOwnProperty(skill) ? maxSkill[skill] : 120,
   );
@@ -17867,7 +17874,14 @@ let openPassiveModal = function (skill) {
 // Triggers onchange of passive skill selection to validate submit button
 let passiveLockedChange = function () {
   let val = $("#passive-skill-input").val();
+  let valPlayer = $("#current-player-skill-input").val();
   let val2 = $("#max-skill-input").val();
+  let playerLevelNumber = Number(valPlayer);
+  let playerLevelValid =
+    !valPlayer ||
+    (Number.isInteger(playerLevelNumber) &&
+      playerLevelNumber >= 1 &&
+      playerLevelNumber <= 120);
   if (
     !!val &&
     !isNaN(parseInt(val)) &&
@@ -17878,7 +17892,8 @@ let passiveLockedChange = function () {
     !isNaN(parseInt(val2)) &&
     parseInt(val2) >= 0 &&
     parseInt(val2) <= 120 &&
-    parseInt(val2) % 1 === 0
+    parseInt(val2) % 1 === 0 &&
+    playerLevelValid
   ) {
     $(".passive-skill-proceed").removeClass("disabled");
   } else {
@@ -17894,6 +17909,7 @@ let addPassiveSkill = function (close, skill) {
   } else {
     let passiveLevelChanged = false;
     let maxLevelChanged = false;
+    let currentPlayerLevelChanged = false;
     let level = !!$("#passive-skill-input").val()
       ? parseInt($("#passive-skill-input").val())
       : NaN;
@@ -17914,7 +17930,23 @@ let addPassiveSkill = function (close, skill) {
       maxSkill[skill] = level2;
       maxLevelChanged = true;
     }
-    if (passiveLevelChanged || maxLevelChanged) {
+    let currentPlayerInput = $("#current-player-skill-input").val();
+    if (!currentPlayerInput) {
+      if (!!currentPlayerSkillLevels && currentPlayerSkillLevels.hasOwnProperty(skill)) {
+        delete currentPlayerSkillLevels[skill];
+        currentPlayerLevelChanged = true;
+      }
+    } else {
+      let level3 = Number(currentPlayerInput);
+      if (Number.isInteger(level3) && level3 >= 1 && level3 <= 120) {
+        if (!currentPlayerSkillLevels) {
+          currentPlayerSkillLevels = {};
+        }
+        currentPlayerSkillLevels[skill] = level3;
+        currentPlayerLevelChanged = true;
+      }
+    }
+    if (passiveLevelChanged || maxLevelChanged || currentPlayerLevelChanged) {
       if (
         passiveLevelChanged &&
         skill === "Slayer" &&
@@ -24684,6 +24716,11 @@ let loadData = async function (startup) {
     if (snapDiff === false) return;
     maxSkill = !!snap.val() ? decodeObject(snap.val()) : null;
   });
+  myRef.child("chunkinfo/currentPlayerSkillLevels").once("value", function (snap) {
+    let snapDiff = preloadHelper(snap, "chunkinfo/currentPlayerSkillLevels");
+    if (snapDiff === false) return;
+    currentPlayerSkillLevels = !!snap.val() ? decodeObject(snap.val()) : {};
+  });
   myRef.child("chunkinfo/prevValueLevelInput").once("value", function (snap) {
     let snapDiff = preloadHelper(snap, "chunkinfo/prevValueLevelInput");
     if (snapDiff === false) return;
@@ -25280,6 +25317,7 @@ let setData = function () {
       slayerLocked: encodeObject(slayerLocked, true),
       passiveSkill: encodeObject(passiveSkill, true),
       maxSkill: encodeObject(maxSkill, true),
+      currentPlayerSkillLevels: encodeObject(currentPlayerSkillLevels, true),
       assignedXpRewards: encodeObject(assignedXpRewards, true),
       manualAreas: encodeObject(manualAreas, true),
       manualSections: encodeObject(manualSections, true),

@@ -194,7 +194,7 @@ let altAmmoGlobal = {};
 let manualSections = {};
 let unlockedSections = {};
 let maxSkill;
-let effectiveMaxSkill = null;
+let currentPlayerSkillLevels = {};
 let userTasks = {};
 let manualPrimary = {};
 let updateLevel;
@@ -298,6 +298,7 @@ onmessage = function(e) {
             isOnlyManualAreas,
             manualSections,
             maxSkill,
+            currentPlayerSkillLevels,
             userTasks,
             manualPrimary,
             updateLevel,
@@ -341,25 +342,15 @@ onmessage = function(e) {
             chunks = {};
         }
 
-        effectiveMaxSkill = null;
         resetCalculationScratch();
         bringAlongTasks = {};
 
+        currentUnlockedChunkCount = Object.keys(chunks).length;
         chunks = getAllChunkAreas(chunks);
         baseChunkData = gatherChunksInfo(chunks);
-        let originalBaseChunkData = freeze(baseChunkData);
         type === 'current' && postMessage({ type: 'loading-update', percentage: '5%' });
         globalValids = calcChallenges(chunks, baseChunkData);
         baseChunkData = tempChunkData;
-        if (type === 'current' && rules["Progressive Skill Caps"]) {
-            let progressiveSkillCaps = calculateProgressiveSkillCaps(globalValids);
-            console.log('progressiveSkillCaps v6.9.64', progressiveSkillCaps);
-            effectiveMaxSkill = buildEffectiveMaxSkill(progressiveSkillCaps);
-            resetCalculationScratch();
-            baseChunkData = freeze(originalBaseChunkData);
-            globalValids = calcChallenges(chunks, baseChunkData);
-            baseChunkData = tempChunkData;
-        }
         type === 'current' && postMessage({ type: 'loading-update', percentage: '95%' });
         highestOverall = calcBIS();
         
@@ -539,13 +530,10 @@ let getLevelForXp = function(xp) {
 }
 
 let hasEffectiveMaxSkill = function(skill) {
-    return (!!effectiveMaxSkill && effectiveMaxSkill.hasOwnProperty(skill)) || (!!maxSkill && maxSkill.hasOwnProperty(skill));
+    return !!maxSkill && maxSkill.hasOwnProperty(skill);
 }
 
 let getEffectiveMaxSkill = function(skill) {
-    if (!!effectiveMaxSkill && effectiveMaxSkill.hasOwnProperty(skill)) {
-        return effectiveMaxSkill[skill];
-    }
     if (!!maxSkill && maxSkill.hasOwnProperty(skill)) {
         return maxSkill[skill];
     }
@@ -557,18 +545,34 @@ let isAboveEffectiveMaxSkill = function(skill, level) {
     return skillCap !== null && level > skillCap;
 }
 
-let buildEffectiveMaxSkill = function(progressiveSkillCaps) {
-    let tempMaxSkill = !!maxSkill ? {...maxSkill} : {};
-    !!progressiveSkillCaps && Object.keys(progressiveSkillCaps).forEach((skill) => {
-        let capInfo = progressiveSkillCaps[skill];
-        if (!!capInfo && !isNaN(parseInt(capInfo['cap']))) {
-            let cap = parseInt(capInfo['cap']);
-            if (!tempMaxSkill.hasOwnProperty(skill) || cap < tempMaxSkill[skill]) {
-                tempMaxSkill[skill] = cap;
-            }
-        }
-    });
-    return tempMaxSkill;
+let getNumericRuleValue = function(rule, defaultValue, minValue) {
+    let value = !!rules && rules.hasOwnProperty(rule) ? parseInt(rules[rule], 10) : defaultValue;
+    if (isNaN(value) || value < minValue) {
+        return defaultValue;
+    }
+    return value;
+}
+
+let calculateChunkPacingSkillCap = function(unlockedChunkCount) {
+    let base = getNumericRuleValue("Chunk Skill Pace Base", 20, 0);
+    let earlyPerChunk = getNumericRuleValue("Chunk Skill Pace Early Per Chunk", 5, 0);
+    let threshold = getNumericRuleValue("Chunk Skill Pace Threshold", 40, 0);
+    let latePerChunk = getNumericRuleValue("Chunk Skill Pace Late Per Chunk", 2, 0);
+    let chunkCount = Math.max(parseInt(unlockedChunkCount, 10) || 0, 0);
+    let earlyCap = base + (earlyPerChunk * chunkCount);
+    let pacingCap = earlyCap < threshold ? earlyCap : Math.max(threshold, base + (latePerChunk * chunkCount));
+    return Math.max(1, pacingCap);
+}
+
+let getCurrentPlayerSkillLevel = function(skill) {
+    if (!currentPlayerSkillLevels || !currentPlayerSkillLevels.hasOwnProperty(skill)) {
+        return null;
+    }
+    let level = parseInt(currentPlayerSkillLevels[skill], 10);
+    if (isNaN(level) || level < 1 || level > 120) {
+        return null;
+    }
+    return level;
 }
 
 let resetCalculationScratch = function() {
@@ -3938,7 +3942,7 @@ let calcChallengesWork = function(chunks, baseChunkData, oldTempItemSkill) {
             }
 
             delete chunkInfo['challenges'][skill][name]['NeverShow'];
-            if (chunkInfo['challenges'][skill][name].hasOwnProperty('Level') && isAboveEffectiveMaxSkill(skill, chunkInfo['challenges'][skill][name]['Level'])) {
+            if (chunkInfo['challenges'][skill][name].hasOwnProperty('Level') && isAboveEffectiveMaxSkill(skill, getEffectiveSkillTaskLevel(skill, name))) {
                 validChallenge = false;
                 wrongThings.push('Max Skill');
                 nonValids[name] = wrongThings;
@@ -9735,6 +9739,7 @@ let calcBIS = function(completedOnly) {
 }
 
 let allSkillTaskArr = {};
+let currentUnlockedChunkCount = 0;
 
 let isTaskBacklogged = function(skill, task) {
     return !!backlog[skill] && (backlog[skill].hasOwnProperty(task) || backlog[skill].hasOwnProperty(task.replaceAll('#', '/')));
@@ -9790,41 +9795,25 @@ let getEffectiveSkillTaskLevel = function(skill, task) {
     return Math.max(level, 1);
 };
 
-let isProgressiveCapAnchor = function(valids, skill, task) {
-    let challenge = chunkInfo['challenges'].hasOwnProperty(skill) && chunkInfo['challenges'][skill].hasOwnProperty(task) ? chunkInfo['challenges'][skill][task] : null;
-    let allowsSecondaryStarter = skill === 'Herblore' &&
+let isProgressiveSecondaryStarter = function(skill, challenge) {
+    return skill === 'Herblore' &&
         !!challenge &&
         challenge['Level'] === 1 &&
         !!challenge['Category'] &&
         challenge['Category'].includes('Cleaning Herbs Primary') &&
         rules['Cleaning Herbs Primary'];
-    return !!valids[skill] &&
-        valids[skill][task] !== false &&
-        !!challenge &&
-        challenge['Primary'] &&
-        (!challenge['Secondary'] || allowsSecondaryStarter) &&
-        !challenge['NeverShow'] &&
-        !isTaskBacklogged(skill, task) &&
-        hasDirectProgressiveAnchorObject(challenge);
 };
 
-let objectHasDirectProgressiveAnchorSource = function(object) {
+let progressivePacedCombatSkills = ['Attack', 'Strength', 'Defence', 'Constitution', 'Ranged', 'Magic', 'Necromancy'];
+
+let isProgressivePacedCombatSkill = function(skill) {
+    return progressivePacedCombatSkills.includes(skill);
+};
+
+let hasProgressiveCombatTrainingSource = function() {
     return !!baseChunkData &&
-        !!baseChunkData['objects'] &&
-        !!baseChunkData['objects'][object] &&
-        Object.values(baseChunkData['objects'][object]).some((source) => source === true);
-};
-
-let hasDirectProgressiveAnchorObject = function(challenge) {
-    if (!challenge || !challenge['Objects']) {
-        return true;
-    }
-    return challenge['Objects'].filter((object) => {
-        if (object.includes('[+]') && objectsPlus.hasOwnProperty(object)) {
-            return objectsPlus[object].some((plus) => objectHasDirectProgressiveAnchorSource(plus));
-        }
-        return objectHasDirectProgressiveAnchorSource(object);
-    }).length === challenge['Objects'].length;
+        !!baseChunkData['monsters'] &&
+        Object.keys(baseChunkData['monsters']).filter((monster) => rules['Boss'] || !bossMonsters.hasOwnProperty(monster)).length > 0;
 };
 
 let shouldReplaceProgressiveCapAnchor = function(capInfo, targetCap, anchorLevel, task) {
@@ -9840,7 +9829,7 @@ let shouldReplaceProgressiveCapAnchor = function(capInfo, targetCap, anchorLevel
     return anchorLevel === capInfo.anchorLevel && task.localeCompare(capInfo.anchorTask, 'en', { numeric: true }) < 0;
 };
 
-let calculateProgressiveSkillCaps = function(valids) {
+let calculateProgressiveSkillCaps = function(progressiveSkillCandidates) {
     let progressiveCombatSkills = Array.isArray(combatSkills) ? combatSkills : ['Attack', 'Strength', 'Defence', 'Constitution', 'Ranged', 'Magic', 'Prayer', 'Summoning', 'Necromancy'];
     let progressiveSkillCaps = {};
     skillNames.forEach((skill) => {
@@ -9857,13 +9846,13 @@ let calculateProgressiveSkillCaps = function(valids) {
     while (changed) {
         changed = false;
         skillNames.forEach((skill) => {
-            if (!valids.hasOwnProperty(skill)) {
+            if (!progressiveSkillCandidates.hasOwnProperty(skill)) {
                 return;
             }
-            Object.keys(valids[skill]).filter((task) => isProgressiveCapAnchor(valids, skill, task)).map((task) => {
+            progressiveSkillCandidates[skill].filter((candidate) => candidate.anchorEligible).map((candidate) => {
                 return {
-                    task,
-                    anchorLevel: getEffectiveSkillTaskLevel(skill, task)
+                    task: candidate.task,
+                    anchorLevel: candidate.effectiveLevel
                 };
             }).filter((anchor) => anchor.anchorLevel !== null).sort((a, b) => {
                 let levelDiff = a.anchorLevel - b.anchorLevel;
@@ -9921,7 +9910,7 @@ let calcCurrentChallenges2 = function() {
         return Object.keys(chunkInfo['challenges'][skill][challenge]['Skills']).filter(subSkill => (!checkPrimaryMethod(subSkill, globalValids, baseChunkData) && (!passiveSkill || !passiveSkill.hasOwnProperty(subSkill) || passiveSkill[subSkill] < chunkInfo['challenges'][skill][challenge]['Skills'][subSkill]) && (subSkill !== 'Slayer' || !slayerLocked || chunkInfo['challenges'][skill][challenge]['Skills'][subSkill] > slayerLocked['level'])) || isAboveEffectiveMaxSkill(subSkill, chunkInfo['challenges'][skill][challenge]['Skills'][subSkill])).length === 0;
     };
 
-    let skillTaskIsRenderable = function(skill, challenge) {
+    let skillTaskPassesBaseCurrentRules = function(skill, challenge) {
         return !!challenge &&
             !!globalValids[skill] &&
             globalValids[skill].hasOwnProperty(challenge) &&
@@ -9929,9 +9918,13 @@ let calcCurrentChallenges2 = function() {
             !!chunkInfo['challenges'][skill] &&
             !!chunkInfo['challenges'][skill][challenge] &&
             !chunkInfo['challenges'][skill][challenge]['NeverShow'] &&
-            (!completedChallenges[skill] || (!completedChallenges[skill].hasOwnProperty(challenge) && !completedChallenges[skill][challenge.replaceAll('#', '/')])) &&
-            (!backlog[skill] || (!backlog[skill].hasOwnProperty(challenge) && !backlog[skill].hasOwnProperty(challenge.replaceAll('#', '/')))) &&
             skillTaskPassesSubSkillRequirements(skill, challenge);
+    };
+
+    let skillTaskIsRenderable = function(skill, challenge) {
+        return skillTaskPassesBaseCurrentRules(skill, challenge) &&
+            !isTaskCompleted(skill, challenge) &&
+            !isTaskBacklogged(skill, challenge);
     };
 
     let preferSkillTask = function(skill, candidate, current) {
@@ -9945,8 +9938,8 @@ let calcCurrentChallenges2 = function() {
             (!chunkInfo['challenges'][skill][current]['Priority'] || (!!chunkInfo['challenges'][skill][candidate]['Priority'] && chunkInfo['challenges'][skill][candidate]['Priority'] < chunkInfo['challenges'][skill][current]['Priority']));
     };
 
-    let skillTaskPassesCurrentDisplayGate = function(skill, challenge) {
-        if (!skillTaskIsRenderable(skill, challenge)) {
+    let skillTaskPassesCurrentDisplayGate = function(skill, challenge, allowCompleted) {
+        if (!skillTaskPassesBaseCurrentRules(skill, challenge) || isTaskBacklogged(skill, challenge) || (!allowCompleted && isTaskCompleted(skill, challenge))) {
             return false;
         }
         if (!realLevel[skill]) {
@@ -9965,7 +9958,437 @@ let calcCurrentChallenges2 = function() {
             (userTasks.hasOwnProperty(skill) && userTasks[skill].hasOwnProperty(challenge));
     };
 
+    let buildProgressiveSkillCandidates = function() {
+        let progressiveSkillCandidates = {};
+        Object.keys(globalValids).filter(skill => skillNames.includes(skill) && skill !== 'Combat').forEach((skill) => {
+            if (!realLevel[skill]) {
+                realLevel[skill] = [];
+            }
+            Object.keys(globalValids[skill]).forEach((challenge) => {
+                if (!skillTaskPassesBaseCurrentRules(skill, challenge) || isTaskBacklogged(skill, challenge)) {
+                    return;
+                }
+                if (!realLevel[skill].hasOwnProperty(challenge)) {
+                    realLevel[skill][challenge] = getEffectiveSkillTaskLevel(skill, challenge);
+                }
+                let challengeInfo = chunkInfo['challenges'][skill][challenge];
+                let effectiveLevel = realLevel[skill][challenge];
+                if (effectiveLevel === null) {
+                    return;
+                }
+                let completed = isTaskCompleted(skill, challenge);
+                let backlogged = isTaskBacklogged(skill, challenge);
+                let primary = !!challengeInfo['Primary'];
+                let allowedSecondaryStarter = isProgressiveSecondaryStarter(skill, challengeInfo);
+                let actionEligible = !completed &&
+                    !backlogged &&
+                    !(effectiveLevel <= 1 && !primary);
+                let anchorEligible = !isProgressivePacedCombatSkill(skill) &&
+                    primary &&
+                    (!challengeInfo['Secondary'] || allowedSecondaryStarter) &&
+                    !backlogged;
+                if (!progressiveSkillCandidates[skill]) {
+                    progressiveSkillCandidates[skill] = [];
+                }
+                progressiveSkillCandidates[skill].push({
+                    skill,
+                    task: challenge,
+                    effectiveLevel,
+                    completed,
+                    backlogged,
+                    anchorEligible,
+                    actionEligible
+                });
+            });
+            if (!!progressiveSkillCandidates[skill]) {
+                progressiveSkillCandidates[skill].sort((a, b) => {
+                    let levelDiff = a.effectiveLevel - b.effectiveLevel;
+                    return levelDiff !== 0 ? levelDiff : a.task.localeCompare(b.task, 'en', { numeric: true });
+                });
+            }
+        });
+        return progressiveSkillCandidates;
+    };
+
+    let getProgressiveCandidateKey = function(skill, task) {
+        return skill + "\u0000" + task;
+    };
+
+    let getProgressiveCandidateIndexes = function(progressiveSkillCandidates) {
+        let candidateByKey = {};
+        let keysByTask = {};
+        Object.keys(progressiveSkillCandidates).forEach((skill) => {
+            progressiveSkillCandidates[skill].forEach((candidate) => {
+                let key = getProgressiveCandidateKey(candidate.skill, candidate.task);
+                candidateByKey[key] = candidate;
+                if (!keysByTask[candidate.task]) {
+                    keysByTask[candidate.task] = [];
+                }
+                keysByTask[candidate.task].push(key);
+            });
+        });
+        return { candidateByKey, keysByTask };
+    };
+
+    let normalizeProgressiveItemName = function(item) {
+        return (item || '').replaceAll(/\*/g, '').trim();
+    };
+
+    let expandProgressiveItemRequirement = function(item) {
+        let normalizedItem = normalizeProgressiveItemName(item);
+        if (normalizedItem.includes('[+]')) {
+            let plusKey = normalizedItem.includes('[+]x') ? normalizedItem.split('[+]x')[0].replaceAll('[+]', '') + '[+]' : normalizedItem;
+            if (!!itemsPlus && itemsPlus.hasOwnProperty(plusKey)) {
+                return itemsPlus[plusKey].map((plus) => normalizeProgressiveItemName(plus));
+            }
+        }
+        return [normalizedItem];
+    };
+
+    let expandProgressiveObjectRequirement = function(object) {
+        let normalizedObject = (object || '').trim();
+        if (normalizedObject.includes('[+]') && !!objectsPlus && objectsPlus.hasOwnProperty(normalizedObject)) {
+            return objectsPlus[normalizedObject].map((plus) => (plus || '').trim());
+        }
+        return [normalizedObject];
+    };
+
+    let getProgressiveSourceCandidateKey = function(item, source, sourceType, candidateIndexes) {
+        if (!source || !sourceType || typeof sourceType !== 'string') {
+            return null;
+        }
+        let sourceSkill = sourceType.split('-').length > 1 ? sourceType.split('-')[1] : null;
+        if (!!sourceSkill) {
+            let directKey = getProgressiveCandidateKey(sourceSkill, source);
+            if (candidateIndexes.candidateByKey.hasOwnProperty(directKey)) {
+                return directKey;
+            }
+        }
+        let taskKeys = candidateIndexes.keysByTask[source] || [];
+        let matchingKeys = taskKeys.filter((key) => {
+            let candidate = candidateIndexes.candidateByKey[key];
+            if (!candidate || !chunkInfo['challenges'][candidate.skill] || !chunkInfo['challenges'][candidate.skill][candidate.task]) {
+                return false;
+            }
+            let challenge = chunkInfo['challenges'][candidate.skill][candidate.task];
+            return normalizeProgressiveItemName(challenge['Output']) === item || sourceType.includes(candidate.skill);
+        });
+        return matchingKeys.length === 1 ? matchingKeys[0] : null;
+    };
+
+    let getProgressiveObjectSourceCandidateKey = function(object, source, sourceType, candidateIndexes) {
+        if (!source || !sourceType || typeof sourceType !== 'string') {
+            return null;
+        }
+        let sourceSkill = sourceType.split('-').length > 1 ? sourceType.split('-')[1] : null;
+        if (!!sourceSkill) {
+            let directKey = getProgressiveCandidateKey(sourceSkill, source);
+            if (candidateIndexes.candidateByKey.hasOwnProperty(directKey)) {
+                return directKey;
+            }
+        }
+        let taskKeys = candidateIndexes.keysByTask[source] || [];
+        let matchingKeys = taskKeys.filter((key) => {
+            let candidate = candidateIndexes.candidateByKey[key];
+            if (!candidate || !chunkInfo['challenges'][candidate.skill] || !chunkInfo['challenges'][candidate.skill][candidate.task]) {
+                return false;
+            }
+            let challenge = chunkInfo['challenges'][candidate.skill][candidate.task];
+            return (challenge['Output Object'] || '') === object || sourceType.includes(candidate.skill);
+        });
+        return matchingKeys.length === 1 ? matchingKeys[0] : null;
+    };
+
+    let checkProgressiveItemAvailability = function(item, availableSourceCandidateKeys, candidateIndexes) {
+        let itemSources = {};
+        if (!!baseChunkData && !!baseChunkData['items']) {
+            [item, item + '*', item + '*^', item + '*^^'].forEach((itemKey) => {
+                if (!!baseChunkData['items'][itemKey]) {
+                    itemSources = combineJSONs(itemSources, baseChunkData['items'][itemKey]);
+                }
+            });
+        }
+        if (!itemSources || Object.keys(itemSources).length === 0) {
+            return {
+                available: false,
+                progressiveSources: []
+            };
+        }
+        let progressiveSources = [];
+        let available = false;
+        Object.keys(itemSources).forEach((source) => {
+            let sourceType = itemSources[source];
+            let sourceKey = getProgressiveSourceCandidateKey(item, source, sourceType, candidateIndexes);
+            if (!sourceKey) {
+                available = true;
+                return;
+            }
+            let sourceCandidate = candidateIndexes.candidateByKey[sourceKey];
+            progressiveSources.push({
+                item,
+                source,
+                sourceType,
+                producerSkill: sourceCandidate ? sourceCandidate.skill : null,
+                producerTask: sourceCandidate ? sourceCandidate.task : null,
+                available: availableSourceCandidateKeys.has(sourceKey)
+            });
+            if (availableSourceCandidateKeys.has(sourceKey)) {
+                available = true;
+            }
+        });
+        return { available, progressiveSources };
+    };
+
+    let checkProgressiveObjectAvailability = function(object, availableSourceCandidateKeys, candidateIndexes) {
+        let objectSources = !!baseChunkData && !!baseChunkData['objects'] ? baseChunkData['objects'][object] : null;
+        if (!objectSources || Object.keys(objectSources).length === 0) {
+            return {
+                available: false,
+                progressiveSources: []
+            };
+        }
+        let progressiveSources = [];
+        let available = false;
+        Object.keys(objectSources).forEach((source) => {
+            let sourceType = objectSources[source];
+            let sourceKey = getProgressiveObjectSourceCandidateKey(object, source, sourceType, candidateIndexes);
+            if (!sourceKey) {
+                available = true;
+                return;
+            }
+            let sourceCandidate = candidateIndexes.candidateByKey[sourceKey];
+            progressiveSources.push({
+                object,
+                source,
+                sourceType,
+                producerSkill: sourceCandidate ? sourceCandidate.skill : null,
+                producerTask: sourceCandidate ? sourceCandidate.task : null,
+                available: availableSourceCandidateKeys.has(sourceKey)
+            });
+            if (availableSourceCandidateKeys.has(sourceKey)) {
+                available = true;
+            }
+        });
+        return { available, progressiveSources };
+    };
+
+    let getProgressiveMissingDependencies = function(candidate, availableSourceCandidateKeys, candidateIndexes) {
+        let challenge = chunkInfo['challenges'][candidate.skill][candidate.task];
+        let items = Array.isArray(challenge['Items']) ? challenge['Items'] : Object.keys(challenge['Items'] || {});
+        let objects = Array.isArray(challenge['Objects']) ? challenge['Objects'] : Object.keys(challenge['Objects'] || {});
+        let missingItems = [];
+        items.forEach((item) => {
+            let options = expandProgressiveItemRequirement(item).filter((option) => !!option);
+            let optionChecks = options.map((option) => checkProgressiveItemAvailability(option, availableSourceCandidateKeys, candidateIndexes));
+            if (optionChecks.some((check) => check.available)) {
+                return;
+            }
+            let progressiveSources = [];
+            optionChecks.forEach((check) => {
+                progressiveSources = progressiveSources.concat(check.progressiveSources.filter((source) => !source.available));
+            });
+            if (progressiveSources.length > 0) {
+                missingItems.push({
+                    requirement: item,
+                    options,
+                    removedSources: progressiveSources
+                });
+            }
+        });
+        objects.forEach((object) => {
+            let options = expandProgressiveObjectRequirement(object).filter((option) => !!option);
+            let optionChecks = options.map((option) => checkProgressiveObjectAvailability(option, availableSourceCandidateKeys, candidateIndexes));
+            if (optionChecks.some((check) => check.available)) {
+                return;
+            }
+            let progressiveSources = [];
+            optionChecks.forEach((check) => {
+                progressiveSources = progressiveSources.concat(check.progressiveSources.filter((source) => !source.available));
+            });
+            if (progressiveSources.length > 0) {
+                missingItems.push({
+                    requirement: object,
+                    type: 'object',
+                    options,
+                    removedSources: progressiveSources
+                });
+            }
+        });
+        return missingItems;
+    };
+
+    let pruneProgressiveTasksByDependencies = function(allowedCandidatesBySkill, availableSourceCandidateKeys, candidateIndexes) {
+        let prunedByDependencies = [];
+        let changed = true;
+        while (changed) {
+            changed = false;
+            Object.keys(allowedCandidatesBySkill).forEach((skill) => {
+                allowedCandidatesBySkill[skill] = allowedCandidatesBySkill[skill].filter((candidate) => {
+                    let missingItems = getProgressiveMissingDependencies(candidate, availableSourceCandidateKeys, candidateIndexes);
+                    if (missingItems.length === 0) {
+                        return true;
+                    }
+                    let candidateKey = getProgressiveCandidateKey(candidate.skill, candidate.task);
+                    availableSourceCandidateKeys.delete(candidateKey);
+                    prunedByDependencies.push({
+                        skill: candidate.skill,
+                        task: candidate.task,
+                        effectiveLevel: candidate.effectiveLevel,
+                        missingItems
+                    });
+                    changed = true;
+                    return false;
+                });
+            });
+        }
+        return prunedByDependencies;
+    };
+
+    let rebuildProgressiveSkillTaskPayload = function(tempChallengeArr) {
+        allSkillTaskArr = {};
+        let progressiveSkillCandidates = buildProgressiveSkillCandidates();
+        let candidateIndexes = getProgressiveCandidateIndexes(progressiveSkillCandidates);
+        let chunkPacingCap = rules["Chunk Skill Pace Limit"] ? calculateChunkPacingSkillCap(currentUnlockedChunkCount) : null;
+        let expectedLevelCaps = {};
+        let progressiveSkillCandidatesAfterExpectedPrune = {};
+        let prunedByExpectedLevel = [];
+        let expectedLevelDebug = {};
+        skillNames.filter((skill) => skill !== 'Combat').forEach((skill) => {
+            let currentPlayerLevel = getCurrentPlayerSkillLevel(skill);
+            let expectedLevelCap = chunkPacingCap !== null || currentPlayerLevel !== null ? Math.max(chunkPacingCap || 1, currentPlayerLevel || 1) : null;
+            let candidatesForSkill = progressiveSkillCandidates[skill] || [];
+            expectedLevelCaps[skill] = {
+                chunkPacingCap,
+                currentPlayerLevel,
+                expectedLevelCap
+            };
+            expectedLevelDebug[skill] = {
+                candidates: candidatesForSkill.length,
+                maxEffectiveLevel: candidatesForSkill.reduce((maxLevel, candidate) => Math.max(maxLevel, candidate.effectiveLevel || 0), 0),
+                expectedLevelCap,
+                aboveExpectedLevel: expectedLevelCap === null ? 0 : candidatesForSkill.filter((candidate) => candidate.effectiveLevel > expectedLevelCap).length
+            };
+            candidatesForSkill.forEach((candidate) => {
+                if (expectedLevelCap !== null && candidate.effectiveLevel > expectedLevelCap) {
+                    prunedByExpectedLevel.push({
+                        skill,
+                        task: candidate.task,
+                        effectiveLevel: candidate.effectiveLevel,
+                        expectedLevelCap,
+                        chunkPacingCap,
+                        currentPlayerLevel,
+                        completed: candidate.completed,
+                        anchorEligible: candidate.anchorEligible,
+                        actionEligible: candidate.actionEligible
+                    });
+                    return;
+                }
+                if (!progressiveSkillCandidatesAfterExpectedPrune[skill]) {
+                    progressiveSkillCandidatesAfterExpectedPrune[skill] = [];
+                }
+                progressiveSkillCandidatesAfterExpectedPrune[skill].push(candidate);
+            });
+        });
+        let progressiveSkillCaps = calculateProgressiveSkillCaps(progressiveSkillCandidatesAfterExpectedPrune);
+        let prunedByAnchorCap = [];
+        let prunedByCombatTraining = [];
+        skillNames.filter((skill) => skill !== 'Combat').forEach((skill) => {
+            let capInfo = progressiveSkillCaps[skill];
+            if (!capInfo || isNaN(parseInt(capInfo['cap'], 10))) {
+                return;
+            }
+            let anchorCap = parseInt(capInfo['cap'], 10);
+            let expectedLevelCap = expectedLevelCaps[skill] ? expectedLevelCaps[skill].expectedLevelCap : null;
+            let pacedCombatSkill = isProgressivePacedCombatSkill(skill);
+            let combatTrainingSource = pacedCombatSkill && hasProgressiveCombatTrainingSource();
+            let finalCap = pacedCombatSkill ? (combatTrainingSource ? (expectedLevelCap !== null ? expectedLevelCap : 120) : 15) : (expectedLevelCap !== null ? Math.min(anchorCap, expectedLevelCap) : anchorCap);
+            capInfo['anchorCap'] = pacedCombatSkill ? null : anchorCap;
+            capInfo['chunkPacingCap'] = expectedLevelCaps[skill] ? expectedLevelCaps[skill].chunkPacingCap : null;
+            capInfo['currentPlayerLevel'] = expectedLevelCaps[skill] ? expectedLevelCaps[skill].currentPlayerLevel : null;
+            capInfo['expectedLevelCap'] = expectedLevelCap;
+            capInfo['cap'] = finalCap;
+            capInfo['combatPacingOnly'] = pacedCombatSkill;
+            capInfo['combatTrainingSource'] = combatTrainingSource;
+            capInfo['limitedByChunkPacing'] = !pacedCombatSkill && expectedLevelCap !== null && finalCap < anchorCap;
+            capInfo['limitedByExpectedLevel'] = !pacedCombatSkill && expectedLevelCap !== null && finalCap < anchorCap;
+            if (pacedCombatSkill) {
+                capInfo['anchorTask'] = null;
+                capInfo['anchorLevel'] = null;
+                capInfo['starterCeiling'] = false;
+            }
+        });
+        console.log('progressiveSkillExpectedLevelDebug v6.9.81', expectedLevelDebug);
+        console.log('progressiveSkillPrunedByExpectedLevel v6.9.81', prunedByExpectedLevel);
+        console.log('progressiveSkillCaps v6.9.81', progressiveSkillCaps);
+        let allowedCandidatesBySkill = {};
+        let availableSourceCandidateKeys = new Set();
+        skillNames.filter((skill) => skill !== 'Combat').forEach((skill) => {
+            let capInfo = progressiveSkillCaps[skill];
+            let cap = !!capInfo && !isNaN(parseInt(capInfo['cap'], 10)) ? parseInt(capInfo['cap'], 10) : 1;
+            (progressiveSkillCandidatesAfterExpectedPrune[skill] || []).forEach((candidate) => {
+                if (candidate.effectiveLevel > cap) {
+                    if (candidate.actionEligible) {
+                        let prunedTask = {
+                            skill,
+                            task: candidate.task,
+                            effectiveLevel: candidate.effectiveLevel,
+                            cap,
+                            anchorTask: capInfo ? capInfo.anchorTask : null,
+                            anchorLevel: capInfo ? capInfo.anchorLevel : null,
+                            anchorCap: capInfo ? capInfo.anchorCap : null
+                        };
+                        if (capInfo && capInfo.combatPacingOnly) {
+                            prunedTask['combatTrainingSource'] = capInfo.combatTrainingSource;
+                            prunedByCombatTraining.push(prunedTask);
+                        } else {
+                            prunedByAnchorCap.push(prunedTask);
+                        }
+                    }
+                    return;
+                }
+                if (candidate.completed || candidate.actionEligible) {
+                    availableSourceCandidateKeys.add(getProgressiveCandidateKey(candidate.skill, candidate.task));
+                }
+                if (!candidate.actionEligible) {
+                    return;
+                }
+                if (!allowedCandidatesBySkill[skill]) {
+                    allowedCandidatesBySkill[skill] = [];
+                }
+                allowedCandidatesBySkill[skill].push(candidate);
+            });
+        });
+        let prunedByDependencies = pruneProgressiveTasksByDependencies(allowedCandidatesBySkill, availableSourceCandidateKeys, candidateIndexes);
+        skillNames.filter((skill) => skill !== 'Combat').forEach((skill) => {
+            let highestChallenge;
+            let allowedTasks = allowedCandidatesBySkill[skill] || [];
+            if (allowedTasks.length > 0) {
+                allSkillTaskArr[skill] = allowedTasks.map((candidate) => candidate.task);
+                allowedTasks.forEach((candidate) => {
+                    if (preferSkillTask(skill, candidate.task, highestChallenge)) {
+                        highestChallenge = candidate.task;
+                    }
+                });
+            }
+            if (!!highestChallenge) {
+                tempChallengeArr[skill] = highestChallenge;
+                highestCurrent[skill] = highestChallenge;
+                highestOverall[skill] = highestChallenge;
+            } else {
+                delete tempChallengeArr[skill];
+                delete highestCurrent[skill];
+            }
+        });
+        console.log('progressiveSkillPrunedByCombatTraining v6.9.81', prunedByCombatTraining);
+        console.log('progressiveSkillPrunedByAnchorCap v6.9.81', prunedByAnchorCap);
+        console.log('progressiveSkillPrunedByDependencies v6.9.81', prunedByDependencies);
+    };
+
     let rebuildCurrentSkillTaskPayload = function(tempChallengeArr) {
+        if (rules["Progressive Skill Caps"]) {
+            rebuildProgressiveSkillTaskPayload(tempChallengeArr);
+            return;
+        }
         allSkillTaskArr = {};
         Object.keys(globalValids).filter(skill => skillNames.includes(skill) && skill !== 'Combat').forEach((skill) => {
             let highestChallenge;
